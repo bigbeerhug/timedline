@@ -1,0 +1,860 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fmtTime12, fmtShort, fmtDur } from "./lib/time";
+import { getIcon } from "./lib/icons";
+import { exportJSON, exportCSV } from "./lib/exports";
+import Card from "./components/Card";
+import TabButton from "./components/TabButton";
+import useDebouncedValue from "./hooks/useDebouncedValue";
+
+// LocalStorage keys
+const LS_ENTRIES = "timedline.entries.v1";
+const LS_ACTIVITY = "timedline.activity.v1";
+const LS_UI = "timedline.ui.v1";
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
+      return ui.activeTab || "log";
+    } catch {
+      return "log";
+    }
+  });
+  const [now, setNow] = useState(new Date());
+
+  // track time on current tab
+  const tabStartRef = useRef(Date.now());
+
+  // entries
+  const [entries, setEntries] = useState(() => {
+    try {
+      const fromLS = JSON.parse(localStorage.getItem(LS_ENTRIES) || "null");
+      if (Array.isArray(fromLS) && fromLS.length) return fromLS;
+    } catch {}
+    // seed demo data if nothing in storage
+    return [
+      {
+        ts: Date.now() - 1000 * 60 * 60 * 24 * 3,
+        date: "2025-08-29",
+        content: "First car delivery (note)",
+      },
+      {
+        ts: Date.now() - 1000 * 60 * 60 * 24 * 4,
+        date: "2025-08-28",
+        content: "photo.jpg (file)",
+        file: { name: "photo.jpg", type: "image/jpeg", url: "" },
+      },
+      {
+        ts: Date.now() - 1000 * 60 * 60 * 24 * 6,
+        date: "2025-08-26",
+        content: "roommate-agreement.pdf",
+        file: {
+          name: "roommate-agreement.pdf",
+          type: "application/pdf",
+          url: "",
+        },
+      },
+    ];
+  });
+
+  // text/file inputs
+  const [newEntry, setNewEntry] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedEntry, setSelectedEntry] = useState(null);
+
+  // activity (master keylog)
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyPaused, setHistoryPaused] = useState(false);
+  const [activity, setActivity] = useState(() => {
+    try {
+      const fromLS = JSON.parse(localStorage.getItem(LS_ACTIVITY) || "null");
+      if (Array.isArray(fromLS)) return fromLS;
+    } catch {}
+    return [{ ts: Date.now(), type: "session", text: "Session started" }];
+  });
+  const [historyFilter, setHistoryFilter] = useState("all"); // all|tab|save|search|open|export|session|duration
+
+  // persist entries/activity/UI
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_ENTRIES, JSON.stringify(entries));
+    } catch {}
+  }, [entries]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_ACTIVITY, JSON.stringify(activity));
+    } catch {}
+  }, [activity]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_UI, JSON.stringify({ activeTab }));
+    } catch {}
+  }, [activeTab]);
+
+  // ticking clock
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // global keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        handleSave();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setActiveTab("search");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newEntry, selectedFile, searchTerm, entries]);
+
+  const logActivity = (text, type = "misc") => {
+    if (historyPaused) return;
+    setActivity((prev) => [{ ts: Date.now(), type, text }, ...prev]);
+  };
+
+  // file change + drag & drop
+  const onFileChange = (e) => {
+    const file = e.target.files?.[0];
+    setSelectedFile(file || null);
+  };
+  const dropRef = useRef(null);
+  useEffect(() => {
+    const el = dropRef.current;
+    if (!el) return;
+    const prevent = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onDrop = (e) => {
+      prevent(e);
+      const file = e.dataTransfer?.files?.[0];
+      if (file) setSelectedFile(file);
+    };
+    ["dragenter", "dragover", "dragleave"].forEach((t) =>
+      el.addEventListener(t, prevent)
+    );
+    el.addEventListener("drop", onDrop);
+    return () => {
+      ["dragenter", "dragover", "dragleave"].forEach((t) =>
+        el.removeEventListener(t, prevent)
+      );
+      el.removeEventListener("drop", onDrop);
+    };
+  }, []);
+
+  const handleTab = (id) => {
+    const nowTs = Date.now();
+    const stayedMs = nowTs - tabStartRef.current;
+    if (tabStartRef.current && activeTab) {
+      logActivity(`Stayed on ${activeTab} for ${fmtDur(stayedMs)}`, "duration");
+    }
+    tabStartRef.current = nowTs;
+    setActiveTab(id);
+    logActivity(`Switched to ${id} tab`, "tab");
+  };
+
+  const handleSave = () => {
+    const text = newEntry.trim();
+    if (!text && !selectedFile) return;
+    const d = new Date();
+    const today = d.toISOString().split("T")[0];
+    let fileMeta = undefined;
+    if (selectedFile) {
+      const url = URL.createObjectURL(selectedFile);
+      fileMeta = { name: selectedFile.name, type: selectedFile.type, url };
+    }
+    const item = {
+      ts: d.getTime(),
+      date: today,
+      content: text || (selectedFile?.name || "(file)"),
+      file: fileMeta,
+    };
+    setEntries((prev) => [item, ...prev]);
+    setNewEntry("");
+    setSelectedFile(null);
+    setActiveTab("archive");
+    logActivity(
+      `Logged new entry: "${(text || selectedFile?.name || "").slice(0, 40)}${
+        (text || selectedFile?.name || "").length > 40 ? "…" : ""
+      }"`,
+      "save"
+    );
+  };
+
+  // Export/Import
+  const handleExportEntries = () => {
+    exportJSON(entries, "timedline-entries.json");
+    logActivity("Exported vault as JSON", "export");
+  };
+  const handleExportHistory = () => {
+    exportJSON(activity, "timedline-activity.json");
+    logActivity("Exported activity history as JSON", "export");
+  };
+  const handleExportCSV = () => {
+    const header = ["ts", "date", "content", "file_name", "file_type", "file_url"];
+    const rows = [
+      header,
+      ...entries.map((e) => [
+        e.ts,
+        e.date,
+        JSON.stringify(e.content).slice(1, -1),
+        e.file?.name || "",
+        e.file?.type || "",
+        e.file?.url || "",
+      ]),
+    ];
+    exportCSV(rows, "timedline-entries.csv");
+    logActivity("Exported vault as CSV", "export");
+  };
+  const importFileRef = useRef(null);
+  const handleImport = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (Array.isArray(data)) {
+          const cleaned = data.filter(
+            (x) =>
+              typeof x.ts === "number" &&
+              typeof x.date === "string" &&
+              typeof x.content === "string"
+          );
+          if (cleaned.length) {
+            setEntries((prev) => [...cleaned, ...prev]);
+            logActivity(`Imported ${cleaned.length} entries`, "save");
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // debounce search
+  const q = useDebouncedValue(searchTerm.trim().toLowerCase(), 200);
+
+  // filtered + grouped data
+  const filtered = useMemo(() => {
+    if (!q) return entries;
+    return entries.filter(
+      (e) =>
+        e.date.toLowerCase().includes(q) ||
+        (e.content || "").toLowerCase().includes(q) ||
+        (e.file?.name || "").toLowerCase().includes(q)
+    );
+  }, [entries, q]);
+
+  const groupedByDate = useMemo(() => {
+    const map = new Map();
+    for (const e of entries) {
+      if (!map.has(e.date)) map.set(e.date, []);
+      map.get(e.date).push(e);
+    }
+    return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [entries]);
+
+  // timeline metrics
+  const times = entries.map((e) => e.ts);
+  const minTime = times.length ? Math.min(...times) : Date.now();
+  const maxTime = times.length ? Math.max(...times) : minTime + 1;
+  const totalRange = Math.max(1, maxTime - minTime);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8fafc", padding: 24 }}>
+      {/* Header */}
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 24,
+        }}
+      >
+        <div style={{ textAlign: "left" }}>
+          <h1 style={{ fontSize: 28, margin: 0 }}>🕒 Timedline</h1>
+          <p style={{ color: "#555", marginTop: 6 }}>Your Forever Vault</p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={handleExportEntries}
+            title="Export entries as JSON"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            ⬇️ Export
+          </button>
+          <button
+            onClick={handleExportCSV}
+            title="Export entries as CSV"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            🧾 CSV
+          </button>
+          <button
+            onClick={() => setHistoryOpen(true)}
+            title="Open Activity History"
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #ddd",
+              background: "#fff",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            🧭 History
+          </button>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <TabButton
+          id="log"
+          label="✍️ Life Log"
+          active={activeTab === "log"}
+          onClick={handleTab}
+          title="Write or drop a file"
+        />
+        <TabButton
+          id="search"
+          label="🔍 Search"
+          active={activeTab === "search"}
+          onClick={handleTab}
+          title="Find by text/date/filename"
+        />
+        <TabButton
+          id="archive"
+          label="📂 Archive"
+          active={activeTab === "archive"}
+          onClick={handleTab}
+          title="Browse everything"
+        />
+      </div>
+
+      {activeTab === "log" && (
+        <Card>
+          <h2 style={{ marginTop: 0 }}>New Entry</h2>
+          <div
+            ref={dropRef}
+            style={{
+              border: "1px dashed #c7d2fe",
+              background: "#eef2ff",
+              padding: 12,
+              borderRadius: 12,
+              marginBottom: 12,
+            }}
+          >
+            <textarea
+              value={newEntry}
+              onChange={(e) => setNewEntry(e.target.value)}
+              placeholder="Write a diary, memo, rant, or note... (⌘/Ctrl+S to save)"
+              rows={4}
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                padding: 10,
+                marginBottom: 12,
+                fontFamily: "inherit",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                marginBottom: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <input type="file" onChange={onFileChange} />
+              {selectedFile && (
+                <span style={{ fontSize: 12, color: "#374151" }}>
+                  Selected: {selectedFile.name}
+                </span>
+              )}
+              <button
+                onClick={() => importFileRef.current?.click()}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Import JSON
+              </button>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept="application/json"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleImport(f);
+                }}
+              />
+            </div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" disabled /> Lock in Vault Cell (Immutable) — (visual only in MVP)
+            </label>
+            <div style={{ marginTop: 12 }}>
+              <button
+                onClick={handleSave}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: "#4f46e5",
+                  color: "#fff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Save Entry
+              </button>
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            Tip: drag & drop a file anywhere inside this blue box.
+          </div>
+        </Card>
+      )}
+
+      {activeTab === "search" && (
+        <Card>
+          <h2 style={{ marginTop: 0 }}>Search</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter")
+                  logActivity(`Searched: "${searchTerm}"`, "search");
+              }}
+              placeholder="Type to filter (e.g., car, 2025-08-29, photo.jpg)..."
+              style={{
+                flex: 1,
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                padding: 10,
+                marginBottom: 12,
+              }}
+            />
+            <button
+              onClick={() => logActivity(`Searched: "${searchTerm}"`, "search")}
+              style={{
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+            >
+              Go
+            </button>
+          </div>
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {filtered.map((e, i) => (
+              <li
+                key={i}
+                style={{ padding: "6px 0", color: "#333", cursor: "pointer" }}
+                onClick={() => {
+                  setSelectedEntry(e);
+                  logActivity(`Opened entry from ${e.date}`, "open");
+                }}
+              >
+                {e.date} — {getIcon(e)} {e.content}
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li style={{ color: "#777" }}>No matches.</li>
+            )}
+          </ul>
+        </Card>
+      )}
+
+      {activeTab === "archive" && (
+        <Card>
+          <h2 style={{ marginTop: 0 }}>Archive Timeline</h2>
+          {groupedByDate.map(([date, items]) => (
+            <div key={date} style={{ marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, color: "#111827", marginBottom: 4 }}>
+                {date}
+              </div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {items.map((e, i) => (
+                  <li
+                    key={i}
+                    style={{ padding: "6px 0", color: "#333", cursor: "pointer" }}
+                    onClick={() => {
+                      setSelectedEntry(e);
+                      logActivity(`Opened entry from ${e.date}`, "open");
+                    }}
+                  >
+                    {getIcon(e)} {e.content}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+            <button
+              onClick={handleExportEntries}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              ⬇️ Export JSON
+            </button>
+            <button
+              onClick={handleExportCSV}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #ddd",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              🧾 Export CSV
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Visual Timedline */}
+      <Card>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <h2 style={{ marginTop: 0 }}>Live Timedline</h2>
+          <div
+            style={{
+              fontVariantNumeric: "tabular-nums",
+              color: "#4f46e5",
+              fontWeight: 700,
+            }}
+          >
+            {fmtTime12(now)}
+          </div>
+        </div>
+
+        <div style={{ position: "relative", height: 480, marginTop: 8 }}>
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: 0,
+              transform: "translateX(-1px)",
+              width: 2,
+              height: "100%",
+              background: "#e5e7eb",
+            }}
+          />
+          {entries.map((e, i) => {
+            const relative = (e.ts - minTime) / totalRange;
+            const top = 24 + relative * 400;
+            const side = i % 2 === 0 ? "left" : "right";
+            const boxStyle = {
+              position: "absolute",
+              top,
+              [side]: "52%",
+              maxWidth: 320,
+              background: "#fff",
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: 12,
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+              cursor: "pointer",
+              transition: "all 0.3s ease",
+            };
+            return (
+              <div key={i}>
+                <div
+                  style={{
+                    position: "absolute",
+                    top: top + 6,
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: 12,
+                    height: 12,
+                    borderRadius: "9999px",
+                    background: "#4f46e5",
+                    boxShadow: "0 0 8px rgba(79,70,229,0.4)",
+                  }}
+                />
+                <div
+                  style={boxStyle}
+                  onClick={() => {
+                    setSelectedEntry(e);
+                    logActivity(`Opened entry from ${e.date}`, "open");
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                    {e.date} • {fmtShort(e.ts)}
+                  </div>
+                  <div style={{ fontWeight: 600, color: "#111827" }}>
+                    {getIcon(e)} {e.content}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Preview Modal */}
+      {selectedEntry && (
+        <div
+          onClick={() => setSelectedEntry(null)}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 720,
+              width: "90%",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>{selectedEntry.date}</h3>
+            <p style={{ marginTop: 4, marginBottom: 12 }}>
+              {getIcon(selectedEntry)} {selectedEntry.content}
+            </p>
+
+            {/* Inline preview for common types */}
+            {selectedEntry.file?.url &&
+              selectedEntry.file?.type?.startsWith("image/") && (
+                <img
+                  src={selectedEntry.file.url}
+                  alt={selectedEntry.file.name}
+                  style={{
+                    maxWidth: "100%",
+                    borderRadius: 8,
+                    border: "1px solid #eee",
+                  }}
+                />
+              )}
+            {selectedEntry.file?.url &&
+              selectedEntry.file?.type === "application/pdf" && (
+                <embed
+                  src={selectedEntry.file.url}
+                  type="application/pdf"
+                  style={{
+                    width: "100%",
+                    height: 420,
+                    border: "1px solid #eee",
+                    borderRadius: 8,
+                  }}
+                />
+              )}
+
+            {/* Fallback download link */}
+            {selectedEntry.file?.url &&
+              !selectedEntry.file?.type?.startsWith("image/") &&
+              selectedEntry.file?.type !== "application/pdf" && (
+                <a
+                  href={selectedEntry.file.url}
+                  download={selectedEntry.file.name}
+                  style={{ display: "inline-block", marginTop: 8 }}
+                >
+                  ⬇️ Download {selectedEntry.file.name}
+                </a>
+              )}
+
+            <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => setSelectedEntry(null)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #ddd",
+                  background: "#f3f4f6",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+              <button
+                onClick={() => navigator.clipboard.writeText(selectedEntry.content)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Copy Text
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Activity History Drawer */}
+      {historyOpen && (
+        <div
+          onClick={() => setHistoryOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)" }}
+        >
+          <aside
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 380,
+              background: "#fff",
+              boxShadow: "-8px 0 24px rgba(0,0,0,0.15)",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+            >
+              <h3 style={{ margin: 0 }}>Activity History</h3>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={handleExportHistory}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #eee",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Export
+                </button>
+                <button
+                  onClick={() => setActivity([])}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #eee",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => setHistoryOpen(false)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #eee",
+                    background: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={historyPaused}
+                  onChange={(e) => setHistoryPaused(e.target.checked)}
+                />
+                Pause recording
+              </label>
+              <select
+                value={historyFilter}
+                onChange={(e) => setHistoryFilter(e.target.value)}
+                style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 8px" }}
+              >
+                <option value="all">All</option>
+                <option value="tab">Tabs</option>
+                <option value="duration">Durations</option>
+                <option value="save">Saves</option>
+                <option value="search">Searches</option>
+                <option value="open">Opens</option>
+                <option value="export">Exports</option>
+                <option value="session">Session</option>
+              </select>
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {activity.filter((a) => (historyFilter === "all" ? true : a.type === historyFilter))
+                  .length === 0 && <li style={{ color: "#777" }}>No activity yet.</li>}
+                {activity
+                  .filter((a) => (historyFilter === "all" ? true : a.type === historyFilter))
+                  .map((a, i) => (
+                    <li key={i} style={{ padding: "10px 0", borderBottom: "1px dashed #e5e7eb" }}>
+                      <div style={{ fontSize: 13, color: "#111827" }}>{a.text}</div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                        {new Date(a.ts).toLocaleString()} • {a.type}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
