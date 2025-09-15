@@ -12,6 +12,7 @@ import ArchiveActions from "./components/ArchiveActions";
 import Timeline from "./components/Timeline";
 import EntryModal from "./components/EntryModal";
 import HistoryDrawer from "./components/HistoryDrawer";
+import TimelineControls from "./components/TimelineControls";
 
 import { fmtDur } from "./lib/time";
 import { LS_UI } from "./constants/storageKeys";
@@ -58,7 +59,9 @@ export default function App() {
       }
     }
     load();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [wantsSupabase]);
 
   // keep user state in sync when storage/ auth changes
@@ -67,14 +70,12 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        // initial fetch
         const u = await storage.getUser?.();
         if (!cancelled) setUser(u || null);
       } catch {
         if (!cancelled) setUser(null);
       }
 
-      // attach auth listener if using Supabase
       if (usingSupabase) {
         try {
           const mod = await import("./services/storage/supabase.js");
@@ -104,19 +105,26 @@ export default function App() {
   // history (hook)
   const {
     activity,
-    historyOpen, setHistoryOpen,
-    historyPaused, setHistoryPaused,
-    historyFilter, setHistoryFilter,
+    historyOpen,
+    setHistoryOpen,
+    historyPaused,
+    setHistoryPaused,
+    historyFilter,
+    setHistoryFilter,
     logActivity,
   } = useHistory({ storage, usingSupabase });
 
   // vault (hook)
   const {
     entries,
-    newEntry, setNewEntry,
-    selectedFile, setSelectedFile,
-    searchTerm, setSearchTerm,
-    selectedEntry, setSelectedEntry,
+    newEntry,
+    setNewEntry,
+    selectedFile,
+    setSelectedFile,
+    searchTerm,
+    setSearchTerm,
+    selectedEntry,
+    setSelectedEntry,
     filtered,
     groupedByDate,
     handleSave,
@@ -138,10 +146,50 @@ export default function App() {
   const [now, setNow] = useState(new Date());
   const tabStartRef = useRef(Date.now());
 
+  // timeline tuning with persistence
+  const [showTimelineControls, setShowTimelineControls] = useState(false);
+
+  const [timelineMinGap, setTimelineMinGap] = useState(() => {
+    try {
+      const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
+      return ui.timeline?.minGap ?? 24;
+    } catch {
+      return 24;
+    }
+  });
+
+  const [timelineTrackHeight, setTimelineTrackHeight] = useState(() => {
+    try {
+      const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
+      return ui.timeline?.trackHeight ?? 400;
+    } catch {
+      return 400;
+    }
+  });
+
   // persist active tab
   useEffect(() => {
-    try { localStorage.setItem(LS_UI, JSON.stringify({ activeTab })); } catch {}
+    try {
+      const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
+      localStorage.setItem(LS_UI, JSON.stringify({ ...ui, activeTab }));
+    } catch {}
   }, [activeTab]);
+
+  // persist timeline tuning
+  useEffect(() => {
+    try {
+      const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
+      const next = {
+        ...ui,
+        timeline: {
+          ...(ui.timeline || {}),
+          minGap: timelineMinGap,
+          trackHeight: timelineTrackHeight,
+        },
+      };
+      localStorage.setItem(LS_UI, JSON.stringify(next));
+    } catch {}
+  }, [timelineMinGap, timelineTrackHeight]);
 
   // clock
   useEffect(() => {
@@ -149,7 +197,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // shortcuts: save + jump to search (now surfaces precise error)
+  // shortcuts: save + jump to search
   useEffect(() => {
     const onKey = async (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -174,7 +222,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [newEntry, selectedFile, searchTerm, entries, handleSave, usingSupabase, user]);
 
-  // tab change (with duration logging)
+  // tab change logging
   const handleTab = (id) => {
     const nowTs = Date.now();
     const stayedMs = nowTs - tabStartRef.current;
@@ -194,7 +242,6 @@ export default function App() {
         </Suspense>
       )}
 
-      {/* Inline error banner */}
       {lastError && (
         <div
           style={{
@@ -226,7 +273,7 @@ export default function App() {
             setNewEntry={setNewEntry}
             selectedFile={selectedFile}
             setSelectedFile={setSelectedFile}
-            disabled={usingSupabase && !user} // disable when not signed in
+            disabled={usingSupabase && !user}
             handleSave={async () => {
               try {
                 setLastError("");
@@ -282,6 +329,33 @@ export default function App() {
       )}
 
       <Card>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={() => setShowTimelineControls((v) => !v)}
+            style={{
+              marginBottom: 8,
+              padding: "6px 10px",
+              border: "1px solid #d1d5db",
+              borderRadius: 8,
+              background: showTimelineControls ? "#eef2ff" : "#f9fafb",
+              cursor: "pointer",
+            }}
+          >
+            {showTimelineControls ? "Hide Timeline Controls" : "Show Timeline Controls"}
+          </button>
+        </div>
+
+        {showTimelineControls && (
+          <TimelineControls
+            minGap={timelineMinGap}
+            trackHeight={timelineTrackHeight}
+            onChange={(patch) => {
+              if (patch.minGap !== undefined) setTimelineMinGap(patch.minGap);
+              if (patch.trackHeight !== undefined) setTimelineTrackHeight(patch.trackHeight);
+            }}
+          />
+        )}
+
         <Timeline
           entries={entries}
           now={now}
@@ -289,6 +363,8 @@ export default function App() {
             setSelectedEntry(e);
             logActivity(`Opened entry from ${e.date}`, "open");
           }}
+          minGap={timelineMinGap}
+          trackHeight={timelineTrackHeight}
         />
       </Card>
 
