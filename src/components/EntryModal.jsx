@@ -1,105 +1,191 @@
 // src/components/EntryModal.jsx
-import { getIcon } from "../lib/icons";
+import { createPortal } from "react-dom";
 
-export default function EntryModal({
-  entry,      // object | null
-  onClose,    // () => void
-  onCopyText, // () => void
-}) {
+export default function EntryModal({ entry, onClose, onCopyText }) {
   if (!entry) return null;
 
-  return (
+  const openAttachment = async (mode = "open") => {
+    const file = entry?.file;
+    if (!file) return;
+
+    const openUrl = (url, downloadName) => {
+      if (mode === "download") {
+        const a = document.createElement("a");
+        a.href = url;
+        if (downloadName) a.download = downloadName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        if (url.startsWith("blob:")) {
+          setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} }, 10000);
+        }
+      } else {
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (url.startsWith("blob:")) {
+          setTimeout(() => { try { URL.revokeObjectURL(url); } catch {} }, 10000);
+        }
+        return win;
+      }
+    };
+
+    // Direct URL string
+    if (typeof file === "string" && /^https?:\/\//i.test(file)) {
+      openUrl(file); return;
+    }
+    // Object with .url
+    if (file?.url && /^https?:\/\//i.test(file.url)) {
+      openUrl(file.url); return;
+    }
+    // Supabase { bucket, path, public? }
+    if (file?.bucket && file?.path) {
+      try {
+        const mod = await import("../services/storage/supabase.js");
+        const sb = mod?.supabaseClient;
+        if (sb) {
+          if (file.public) {
+            const { data } = sb.storage.from(file.bucket).getPublicUrl(file.path);
+            if (data?.publicUrl) openUrl(data.publicUrl);
+          } else {
+            const { data, error } = await sb.storage.from(file.bucket).createSignedUrl(file.path, 60);
+            if (!error && data?.signedUrl) openUrl(data.signedUrl);
+          }
+          return;
+        }
+      } catch {}
+    }
+    // Blob/File
+    if (typeof window !== "undefined" && (file instanceof Blob || file?.arrayBuffer)) {
+      try {
+        const u = URL.createObjectURL(file);
+        openUrl(u, file?.name || "attachment");
+        return;
+      } catch {}
+    }
+  };
+
+  const overlay = (
     <div
-      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: "rgba(0,0,0,0.5)",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: 16,
+        // BIG z-index so it clears any stacking contexts
+        zIndex: 10000,
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
       }}
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
+          position: "relative",
+          width: "min(720px, 92vw)",
           background: "#fff",
           borderRadius: 12,
-          padding: 24,
-          maxWidth: 720,
-          width: "90%",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+          border: "1px solid #e5e7eb",
+          zIndex: 10001, // ensure the card is above the overlay itself
         }}
       >
-        <h3 style={{ marginTop: 0 }}>{entry.date}</h3>
-        <p style={{ marginTop: 4, marginBottom: 12 }}>
-          {getIcon(entry)} {entry.content}
-        </p>
-
-        {/* Inline preview for common types */}
-        {entry.file?.url && entry.file?.type?.startsWith("image/") && (
-          <img
-            src={entry.file.url}
-            alt={entry.file.name}
-            style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid #eee" }}
-          />
-        )}
-
-        {entry.file?.url && entry.file?.type === "application/pdf" && (
-          <embed
-            src={entry.file.url}
-            type="application/pdf"
-            style={{
-              width: "100%",
-              height: 420,
-              border: "1px solid #eee",
-              borderRadius: 8,
-            }}
-          />
-        )}
-
-        {/* Fallback download link */}
-        {entry.file?.url &&
-          !entry.file?.type?.startsWith("image/") &&
-          entry.file?.type !== "application/pdf" && (
-            <a
-              href={entry.file.url}
-              download={entry.file.name}
-              style={{ display: "inline-block", marginTop: 8 }}
+        {/* Header */}
+        <div
+          style={{
+            padding: "12px 16px",
+            borderBottom: "1px solid #f1f5f9",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "#111827" }}>
+            {entry.date} {entry.ts ? "• " + new Date(entry.ts).toLocaleTimeString() : ""}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => onCopyText?.()}
+              style={{
+                padding: "6px 10px",
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                background: "#f9fafb",
+                cursor: "pointer",
+              }}
             >
-              ⬇️ Download {entry.file.name}
-            </a>
-          )}
+              Copy
+            </button>
+            <button
+              onClick={() => onClose?.()}
+              style={{
+                padding: "6px 10px",
+                border: "1px solid #d1d5db",
+                borderRadius: 8,
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
 
-        <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "#f3f4f6",
-              cursor: "pointer",
-            }}
-          >
-            Close
-          </button>
-          <button
-            onClick={onCopyText}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "#fff",
-              cursor: "pointer",
-            }}
-          >
-            Copy Text
-          </button>
+        {/* Body */}
+        <div style={{ padding: 16, color: "#111827", lineHeight: 1.55 }}>
+          <div style={{ whiteSpace: "pre-wrap" }}>{entry.content}</div>
+
+          {entry?.file ? (
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTop: "1px solid #f1f5f9",
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                flexWrap: "wrap",
+                fontSize: 14,
+                color: "#1f2937",
+              }}
+            >
+              <span>📎 {entry.file?.name || "Attachment"}</span>
+              <button
+                onClick={() => openAttachment("open")}
+                style={{
+                  padding: "4px 8px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  background: "#f9fafb",
+                  cursor: "pointer",
+                }}
+              >
+                Open attachment
+              </button>
+              <button
+                onClick={() => openAttachment("download")}
+                style={{
+                  padding: "4px 8px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                Download
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   );
+
+  // Portal to body to avoid parent stacking contexts
+  return typeof document !== "undefined"
+    ? createPortal(overlay, document.body)
+    : overlay;
 }
