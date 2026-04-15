@@ -21,8 +21,9 @@ function csvEscape(v) {
 }
 
 function exportCSV(entries, filename) {
-  const header = ["ts", "date", "content", "file_name", "file_type", "file_url"];
+  const header = ["id", "ts", "date", "content", "file_name", "file_type", "file_url"];
   const rows = entries.map((e) => [
+    e.id ?? "",
     e.ts,
     e.date,
     e.content ?? "",
@@ -30,10 +31,11 @@ function exportCSV(entries, filename) {
     e.file?.type ?? "",
     e.file?.url ?? "",
   ]);
-  const csv =
-    [header.map(csvEscape).join(",")]
-      .concat(rows.map((r) => r.map(csvEscape).join(",")))
-      .join("\n");
+
+  const csv = [header.map(csvEscape).join(",")]
+    .concat(rows.map((r) => r.map(csvEscape).join(",")))
+    .join("\n");
+
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -43,30 +45,37 @@ function exportCSV(entries, filename) {
   URL.revokeObjectURL(url);
 }
 
-export default function useVault({ storage, usingSupabase, logActivity }) {
+export default function useVault({ storage, usingSupabase, logActivity, user }) {
   const [entries, setEntries] = useState([]);
   const [newEntry, setNewEntry] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEntry, setSelectedEntry] = useState(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
-  // Load entries whenever storage driver changes (local ⇄ supabase)
   const loadEntries = useCallback(async () => {
     try {
       const list = await storage.listEntries();
+      console.log("[vault] loaded entries:", list);
       setEntries(Array.isArray(list) ? list : []);
     } catch (e) {
       console.error("[vault] loadEntries failed:", e);
+      setEntries([]);
     }
   }, [storage]);
 
   useEffect(() => {
-    loadEntries();
-  }, [loadEntries, usingSupabase]);
+    // In supabase mode, wait until the user is resolved before loading.
+    if (usingSupabase && !user) {
+      return;
+    }
 
-  // Save handler (returns {ok, error})
+    loadEntries();
+  }, [loadEntries, usingSupabase, user?.id, reloadTick]);
+
   const handleSave = useCallback(async () => {
     const text = (newEntry || "").trim();
+
     if (!text && !selectedFile) {
       return { ok: false, error: "Nothing to save — add text or attach a file." };
     }
@@ -75,87 +84,111 @@ export default function useVault({ storage, usingSupabase, logActivity }) {
     const ts = d.getTime();
     const today = d.toISOString().split("T")[0];
 
-    let fileMeta = null;
-
-    // If there is a file, try upload first
-    if (selectedFile) {
-      try {
-        // local driver returns { name,type,url }, supabase returns { path,name,type }
-        const uploaded = await storage.uploadFile(selectedFile);
-        fileMeta = uploaded
-          ? {
-              path: uploaded.path || null,
-              name: uploaded.name || selectedFile.name,
-              type: uploaded.type || selectedFile.type || "application/octet-stream",
-              url: uploaded.url || null,
-            }
-          : null;
-      } catch (e) {
-        console.error("[vault] uploadFile failed:", e);
-        return { ok: false, error: e?.message || "Upload failed." };
-      }
-    }
+    let uploadedFile = null;
 
     try {
-      await storage.createEntry({
+      if (selectedFile) {
+        uploadedFile = await storage.uploadFile(selectedFile);
+      }
+
+      const created = await storage.createEntry({
         ts,
         date: today,
         content: text || selectedFile?.name || "(file)",
-        file: fileMeta,
+        file: uploadedFile
+          ? {
+              path: uploadedFile.path || null,
+              name: uploadedFile.name || selectedFile?.name || null,
+              type:
+                uploadedFile.type ||
+                selectedFile?.type ||
+                "application/octet-stream",
+            }
+          : null,
       });
 
-      // Refresh from source of truth (so Supabase signed URLs are resolved)
-      const fresh = await storage.listEntries();
-      if (Array.isArray(fresh) && fresh.length >= 0) {
-        setEntries(fresh);
-      } else {
-        // Fallback optimistic update
-        setEntries((prev) => [
-          { ts, date: today, content: text || selectedFile?.name || "(file)", file: fileMeta },
-          ...prev,
-        ]);
-      }
+      const normalizedEntry = created || {
+        id: null,
+        ts,
+        date: today,
+        content: text || selectedFile?.name || "(file)",
+        file: uploadedFile
+          ? {
+              path: uploadedFile.path || null,
+              name: uploadedFile.name || selectedFile?.name || null,
+              type:
+                uploadedFile.type ||
+                selectedFile?.type ||
+                "application/octet-stream",
+              url: uploadedFile.url || null,
+            }
+          : null,
+      };
 
+      setEntries((prev) => [normalizedEntry, ...prev]);
       setNewEntry("");
       setSelectedFile(null);
+
       logActivity?.(
-        `Logged new entry: "${(text || selectedFile?.name || "").slice(0, 40)}${
-          (text || selectedFile?.name || "").length > 40 ? "…" : ""
+        `Logged new entry: "${(normalizedEntry.content || "").slice(0, 40)}${
+          (normalizedEntry.content || "").length > 40 ? "…" : ""
         }"`,
         "save"
       );
 
       return { ok: true };
     } catch (e) {
-      console.error("[vault] createEntry failed:", e);
-      return { ok: false, error: e?.message || "Create entry failed." };
+      console.error("[vault] handleSave failed:", e);
+
+      if (uploadedFile?.path && typeof storage.deleteFile === "function") {
+        try {
+          await storage.deleteFile(uploadedFile.path);
+        } catch (cleanupError) {
+          console.warn("[vault] cleanup deleteFile failed:", cleanupError);
+        }
+      }
+
+      return { ok: false, error: e?.message || "Save failed." };
     }
   }, [newEntry, selectedFile, storage, logActivity]);
 
-  // Delete entry
   const deleteEntry = useCallback(
     async (e) => {
       try {
-        await storage.deleteEntry(e.ts, e.file?.path || null);
-        setEntries((prev) => prev.filter((x) => x.ts !== e.ts));
+        const entryId = e.id ?? e.ts;
+        await storage.deleteEntry(entryId, e.file?.path || null);
+
+        setEntries((prev) => {
+          if (e.id != null) {
+            return prev.filter((x) => x.id !== e.id);
+          }
+          return prev.filter((x) => x.ts !== e.ts);
+        });
+
+        if (selectedEntry?.id != null && e.id === selectedEntry.id) {
+          setSelectedEntry(null);
+        } else if (selectedEntry?.ts === e.ts) {
+          setSelectedEntry(null);
+        }
+
         logActivity?.(`Deleted entry from ${e.date}`, "save");
       } catch (err) {
         console.error("[vault] deleteEntry failed:", err);
         throw err;
       }
     },
-    [storage, logActivity]
+    [storage, logActivity, selectedEntry]
   );
 
-  // Import (JSON array of entries)
   const handleImport = useCallback(
     (file) => {
       const reader = new FileReader();
+
       reader.onload = async () => {
         try {
           const data = JSON.parse(String(reader.result));
           if (!Array.isArray(data)) return;
-          // Only import minimal safe fields
+
           const cleaned = data
             .filter(
               (x) =>
@@ -167,46 +200,55 @@ export default function useVault({ storage, usingSupabase, logActivity }) {
               ts: x.ts,
               date: x.date,
               content: x.content,
-              file: x.file && typeof x.file === "object"
-                ? {
-                    path: x.file.path || null,
-                    name: x.file.name || null,
-                    type: x.file.type || null,
-                    url: x.file.url || null,
-                  }
-                : null,
+              file:
+                x.file && typeof x.file === "object"
+                  ? {
+                      path: x.file.path || null,
+                      name: x.file.name || null,
+                      type: x.file.type || null,
+                      url: x.file.url || null,
+                    }
+                  : null,
             }));
 
           if (!cleaned.length) return;
 
-          // Persist to driver (Supabase: insert; Local: write to localStorage)
-          for (const row of cleaned) {
-            try {
-              await storage.createEntry({
-                ts: row.ts,
-                date: row.date,
-                content: row.content,
-                file: row.file,
-              });
-            } catch (e) {
-              console.warn("[vault] import createEntry failed for ts=", row.ts, e?.message || e);
-            }
-          }
-          await loadEntries();
+          await Promise.all(
+            cleaned.map(async (row) => {
+              try {
+                await storage.createEntry({
+                  ts: row.ts,
+                  date: row.date,
+                  content: row.content,
+                  file: row.file,
+                });
+              } catch (e) {
+                console.warn(
+                  "[vault] import createEntry failed for ts=",
+                  row.ts,
+                  e?.message || e
+                );
+              }
+            })
+          );
+
+          setReloadTick((n) => n + 1);
           logActivity?.(`Imported ${cleaned.length} entries`, "save");
         } catch (e) {
           console.error("[vault] handleImport parsing failed:", e);
         }
       };
+
       reader.readAsText(file);
     },
-    [storage, loadEntries, logActivity]
+    [storage, logActivity]
   );
 
-  // Filtered list for search tab
   const filtered = useMemo(() => {
     const q = (searchTerm || "").trim().toLowerCase();
+
     if (!q) return entries;
+
     return entries.filter(
       (e) =>
         e.date.toLowerCase().includes(q) ||
@@ -215,17 +257,17 @@ export default function useVault({ storage, usingSupabase, logActivity }) {
     );
   }, [entries, searchTerm]);
 
-  // Grouped for archive
   const groupedByDate = useMemo(() => {
     const map = new Map();
+
     for (const e of entries) {
       if (!map.has(e.date)) map.set(e.date, []);
       map.get(e.date).push(e);
     }
+
     return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [entries]);
 
-  // Exports
   const handleExportEntries = useCallback(() => {
     exportJSON(entries, "timedline-entries.json");
     logActivity?.("Exported vault as JSON", "export");

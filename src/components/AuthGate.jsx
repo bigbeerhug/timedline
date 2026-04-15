@@ -1,161 +1,62 @@
-// src/components/AuthGate.jsx
 import { useEffect, useState } from "react";
-import { supabaseClient as supabase } from "../services/storage/supabase";
+import {
+  getDevUser,
+  setDevUser,
+  clearDevUser,
+  supabaseClient,
+} from "../services/storage/supabase";
 
-// Used ONLY when you click “Magic link”
-const REDIRECT = (import.meta.env.VITE_REDIRECT_URL || "").trim();
+const DEV_USER = {
+  id: "3b022637-69ee-44eb-a3e9-0dd43810c331",
+  email: "paulson3680@gmail.com",
+};
 
-export default function AuthGate() {
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState(""); // 6-digit email code
+export default function DevAuthGate() {
   const [user, setUser] = useState(null);
-  const [status, setStatus] = useState(""); // info/error
-  const [busy, setBusy] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false); // for compact signed-in view
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  // On mount: if you used a magic link, exchange ?code=… for a session. Then fetch current user.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const fullUrl = window.location.href;
+    let mounted = true;
 
-        // PKCE code may come in search params or hash
-        const urlObj = new URL(fullUrl);
-        const hasCodeQuery = urlObj.searchParams.get("code");
-        const hashParams = new URLSearchParams(
-          fullUrl.includes("#") ? fullUrl.slice(fullUrl.indexOf("#") + 1) : ""
-        );
-        const hasCodeHash = hashParams.get("code");
-        const hasCode = hasCodeQuery || hasCodeHash;
+    async function loadUser() {
+      const {
+        data: { user: authUser },
+      } = await supabaseClient.auth.getUser();
 
-        if (hasCode) {
-          setStatus("Completing sign-in…");
-          const { error } = await supabase.auth.exchangeCodeForSession(fullUrl);
-          if (error) setStatus(`Sign-in failed: ${error.message}`);
-          else setStatus("Signed in!");
+      if (!mounted) return;
+      setUser(authUser || getDevUser());
+    }
 
-          // Clean URL
-          try {
-            urlObj.searchParams.delete("code");
-            urlObj.searchParams.delete("type");
-            const clean = urlObj.pathname + (urlObj.search || "");
-            window.history.replaceState({}, document.title, clean);
-          } catch {}
-        }
+    loadUser();
 
-        // Current user
-        const { data, error } = await supabase.auth.getUser();
-        if (!cancelled) {
-          if (error) setUser(null);
-          else {
-            setUser(data?.user || null);
-            setEmail(data?.user?.email || "");
-            if (data?.user?.email) setStatus("");
-          }
-        }
-      } catch (e) {
-        if (!cancelled) setStatus(e?.message || String(e));
-      }
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-      if (session?.user?.email) setStatus("");
+    const {
+      data: { subscription },
+    } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || getDevUser());
     });
 
     return () => {
-      cancelled = true;
-      try {
-        sub?.subscription?.unsubscribe?.();
-      } catch {}
+      mounted = false;
+      subscription.unsubscribe();
     };
   }, []);
 
-  // --- Email CODE flow (recommended; no redirect required) ---
-  const sendCode = async (e) => {
-    e.preventDefault();
-    setStatus("");
-    if (!email) return setStatus("Enter your email.");
-
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true }, // creates user if not exists
-      });
-      if (error) setStatus(`Could not send code: ${error.message}`);
-      else setStatus(`Code sent to ${email}. Check your email.`);
-    } catch (err) {
-      setStatus(err?.message || String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verifyCode = async (e) => {
-    e.preventDefault();
-    setStatus("");
-    if (!email) return setStatus("Enter your email.");
-    if (!code || code.length < 6) return setStatus("Enter the 6-digit code.");
-
-    setBusy(true);
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: "email", // verifying 6-digit email code
-      });
-      if (error) setStatus(`Verify failed: ${error.message}`);
-      else if (data?.user) {
-        setStatus("Signed in!");
-        setUser(data.user);
-        setMenuOpen(false);
-      } else {
-        setStatus("Verify failed: no user returned.");
-      }
-    } catch (err) {
-      setStatus(err?.message || String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // --- MAGIC LINK flow (optional; uses your hosted redirect origin) ---
-  const sendMagicLink = async (e) => {
-    e.preventDefault();
-    setStatus("");
-    if (!email) return setStatus("Enter your email.");
-    if (!REDIRECT) return setStatus("Magic link requires VITE_REDIRECT_URL.");
-
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: REDIRECT, shouldCreateUser: true },
-      });
-      if (error) setStatus(`Could not send link: ${error.message}`);
-      else setStatus(`Magic link sent to ${email}.`);
-    } catch (err) {
-      setStatus(err?.message || String(err));
-    } finally {
-      setBusy(false);
-    }
+  const signIn = () => {
+    if (!import.meta.env.DEV) return;
+    setDevUser(DEV_USER);
+    setUser(DEV_USER);
+    setMenuOpen(false);
   };
 
   const signOut = async () => {
-    setBusy(true);
-    setStatus("");
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) setStatus(error.message);
-      setMenuOpen(false);
-    } finally {
-      setBusy(false);
-    }
+    clearDevUser();
+    await supabaseClient.auth.signOut();
+    setUser(null);
+    setMenuOpen(false);
   };
 
-  // Styles
+  if (!import.meta.env.DEV && !user) return null;
+
   const shell = { position: "fixed", top: 8, right: 8, zIndex: 50 };
   const panel = {
     background: "#ffffffcc",
@@ -179,23 +80,40 @@ export default function AuthGate() {
   };
 
   if (user) {
-    // Compact pill when signed in
-    const display = user.email?.length > 24 ? user.email.slice(0, 24) + "…" : user.email;
+    const display =
+      user.email?.length > 24 ? `${user.email.slice(0, 24)}…` : user.email;
+
     return (
       <div style={shell}>
-        <div style={pill} onClick={() => setMenuOpen((v) => !v)} title={user.email}>
-          <span role="img" aria-label="user">👤</span>
+        <div
+          style={pill}
+          onClick={() => setMenuOpen((v) => !v)}
+          title={user.email}
+        >
+          <span role="img" aria-label="user">
+            👤
+          </span>
           <span style={{ fontSize: 13 }}>{display}</span>
-          <span style={{ fontSize: 16, lineHeight: 1 }}>{menuOpen ? "▴" : "▾"}</span>
+          <span style={{ fontSize: 16, lineHeight: 1 }}>
+            {menuOpen ? "▴" : "▾"}
+          </span>
         </div>
+
         {menuOpen && (
           <div style={{ ...panel, marginTop: 8 }}>
             <div style={{ fontSize: 12, color: "#374151", marginBottom: 8 }}>
-              Signed in as <strong>{user.email}</strong>
+              {import.meta.env.DEV ? (
+                <>
+                  Local dev mode as <strong>{user.email}</strong>
+                </>
+              ) : (
+                <>
+                  Signed in as <strong>{user.email}</strong>
+                </>
+              )}
             </div>
             <button
               onClick={signOut}
-              disabled={busy}
               style={{
                 padding: "6px 10px",
                 borderRadius: 8,
@@ -213,91 +131,31 @@ export default function AuthGate() {
     );
   }
 
-  // Not signed in → code flow UI + optional magic link button
   return (
     <div style={shell}>
       <div style={panel}>
-        <form onSubmit={verifyCode} style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 600, fontSize: 13 }}>Sign in</div>
-          <input
-            type="email"
-            value={email}
-            placeholder="you@example.com"
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 8px" }}
-          />
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              onClick={sendCode}
-              disabled={busy}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "#f9fafb",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
-              {busy ? "Sending…" : "Send code"}
-            </button>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              placeholder="6-digit code"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              style={{
-                flex: 1,
-                border: "1px solid #ddd",
-                borderRadius: 8,
-                padding: "6px 8px",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            />
-            <button
-              type="submit"
-              disabled={busy}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "#e5f3ff",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              Verify
-            </button>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>
+            Timedline local dev sign-in
           </div>
-
-          {/* Optional fallback */}
+          <div style={{ fontSize: 12, color: "#374151" }}>
+            This bypasses Supabase Auth for now and uses your restored data.
+          </div>
           <button
             type="button"
-            onClick={sendMagicLink}
-            disabled={busy}
+            onClick={signIn}
             style={{
-              marginTop: 4,
-              padding: "6px 10px",
+              padding: "8px 10px",
               borderRadius: 8,
-              border: "1px solid #eee",
-              background: "#fff",
+              border: "1px solid #ddd",
+              background: "#e5f3ff",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#374151",
+              fontWeight: 700,
             }}
-            title="Requires VITE_REDIRECT_URL to be your hosted origin"
           >
-            Or use Magic link
+            Continue
           </button>
-
-          {status && (
-            <div style={{ marginTop: 6, fontSize: 12, color: "#374151" }}>{status}</div>
-          )}
-        </form>
+        </div>
       </div>
     </div>
   );

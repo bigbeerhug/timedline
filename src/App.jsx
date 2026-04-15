@@ -16,93 +16,230 @@ import TimelineControls from "./components/TimelineControls";
 
 import { fmtDur } from "./lib/time";
 import { LS_UI } from "./constants/storageKeys";
-import localDriver from "./services/storage/local"; // safe fallback
+import localDriver from "./services/storage/local";
 import useHistory from "./hooks/useHistory";
 import useVault from "./hooks/useVault";
 
-// Only render AuthGate when Supabase is actually ready
 const LazyAuthGate = lazy(() => import("./components/AuthGate"));
 
 export default function App() {
   const wantsSupabase =
     (import.meta.env.VITE_STORAGE_DRIVER || "local").toLowerCase() === "supabase";
 
-  // start in local mode so UI always renders
   const [storage, setStorage] = useState(() => localDriver());
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [authGateReady, setAuthGateReady] = useState(false);
 
-  // auth + error surface
   const [user, setUser] = useState(null);
   const [lastError, setLastError] = useState("");
+  const [debugInfo, setDebugInfo] = useState({
+    driver: import.meta.env.VITE_STORAGE_DRIVER || "local",
+    usingSupabase: false,
+    userEmail: null,
+    userId: null,
+  });
 
-  // try to load Supabase driver dynamically; fallback to local on any error
+  const [dbDebug, setDbDebug] = useState({
+    totalCount: null,
+    sampleCount: null,
+    sampleFirst: null,
+    countError: null,
+    sampleError: null,
+  });
+
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
-      if (!wantsSupabase) return;
+      if (!wantsSupabase) {
+        setDebugInfo((prev) => ({
+          ...prev,
+          driver: "local",
+          usingSupabase: false,
+        }));
+        return;
+      }
+
       try {
         const mod = await import("./services/storage/supabase.js");
         if (cancelled) return;
+
         const drv = mod.default?.();
         if (drv) {
           setStorage(drv);
           setUsingSupabase(true);
           setAuthGateReady(true);
+          setDebugInfo((prev) => ({
+            ...prev,
+            driver: "supabase",
+            usingSupabase: true,
+          }));
         } else {
-          console.warn("[storage] Supabase driver has no default export; using local.");
+          console.warn("[App] Supabase driver missing default export; using local");
+          setUsingSupabase(false);
+          setAuthGateReady(false);
         }
       } catch (e) {
-        console.error("[storage] Failed to load Supabase driver. Using local.", e);
+        console.error("[App] Failed to load Supabase driver. Using local.", e);
         setUsingSupabase(false);
         setAuthGateReady(false);
+        setDebugInfo((prev) => ({
+          ...prev,
+          driver: "local-fallback",
+          usingSupabase: false,
+        }));
       }
     }
+
     load();
+
     return () => {
       cancelled = true;
     };
   }, [wantsSupabase]);
 
-  // keep user state in sync when storage/ auth changes
   useEffect(() => {
-    let unsub = null;
     let cancelled = false;
-    (async () => {
-      try {
-        const u = await storage.getUser?.();
-        if (!cancelled) setUser(u || null);
-      } catch {
-        if (!cancelled) setUser(null);
-      }
+    let unsubscribeFn = null;
 
-      if (usingSupabase) {
-        try {
-          const mod = await import("./services/storage/supabase.js");
-          const sb = mod.supabaseClient;
-          if (sb && !cancelled) {
-            const { data } = sb.auth.onAuthStateChange((_event, session) => {
-              setUser(session?.user || null);
-            });
-            unsub =
-              data?.subscription?.unsubscribe ||
-              data?.subscription?.unsubscribe?.bind?.(data.subscription);
-          }
-        } catch (e) {
-          console.warn("[auth] Could not attach auth listener:", e?.message || e);
+    async function syncUser() {
+      try {
+        const currentUser = await storage.getUser?.();
+        if (!cancelled) {
+          setUser(currentUser || null);
+          setDebugInfo((prev) => ({
+            ...prev,
+            usingSupabase,
+            userEmail: currentUser?.email || null,
+            userId: currentUser?.id || null,
+          }));
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          setDebugInfo((prev) => ({
+            ...prev,
+            usingSupabase,
+            userEmail: null,
+            userId: null,
+          }));
         }
       }
-    })();
+
+      if (!usingSupabase) return;
+
+      try {
+        const mod = await import("./services/storage/supabase.js");
+        const sb = mod.supabaseClient;
+        const getDevUser = mod.getDevUser;
+
+        if (!sb || cancelled) return;
+
+        const { data } = sb.auth.onAuthStateChange(async (_event, session) => {
+          const devUser = typeof getDevUser === "function" ? getDevUser() : null;
+          const nextUser = session?.user || devUser || null;
+
+          setUser(nextUser);
+          setDebugInfo((prev) => ({
+            ...prev,
+            usingSupabase: true,
+            userEmail: nextUser?.email || null,
+            userId: nextUser?.id || null,
+          }));
+        });
+
+        unsubscribeFn = data?.subscription?.unsubscribe?.bind(data.subscription);
+
+        const {
+          data: { user: authUser },
+        } = await sb.auth.getUser();
+
+        if (!cancelled) {
+          const devUser = typeof getDevUser === "function" ? getDevUser() : null;
+          const nextUser = authUser || devUser || null;
+
+          setUser(nextUser);
+          setDebugInfo((prev) => ({
+            ...prev,
+            usingSupabase: true,
+            userEmail: nextUser?.email || null,
+            userId: nextUser?.id || null,
+          }));
+        }
+      } catch (e) {
+        console.warn("[App] Could not attach auth listener:", e?.message || e);
+      }
+    }
+
+    syncUser();
 
     return () => {
-      try {
-        if (typeof unsub === "function") unsub();
-      } catch {}
       cancelled = true;
+      try {
+        if (typeof unsubscribeFn === "function") {
+          unsubscribeFn();
+        }
+      } catch {}
     };
   }, [storage, usingSupabase]);
 
-  // history (hook)
+  // Direct DB debug from frontend
+  useEffect(() => {
+    let cancelled = false;
+
+    async function runDbDebug() {
+      if (!usingSupabase) return;
+
+      try {
+        const mod = await import("./services/storage/supabase.js");
+        const sb = mod.supabaseClient;
+        if (!sb || cancelled) return;
+
+        const countRes = await sb
+          .from("entries")
+          .select("*", { count: "exact", head: true });
+
+        const sampleRes = await sb
+          .from("entries")
+          .select("id, user_id, ts, date, content")
+          .order("ts", { ascending: false })
+          .limit(3);
+
+        if (cancelled) return;
+
+        setDbDebug({
+          totalCount: countRes.count ?? null,
+          sampleCount: Array.isArray(sampleRes.data) ? sampleRes.data.length : 0,
+          sampleFirst:
+            Array.isArray(sampleRes.data) && sampleRes.data.length > 0
+              ? JSON.stringify(sampleRes.data[0], null, 2)
+              : null,
+          countError: countRes.error ? countRes.error.message : null,
+          sampleError: sampleRes.error ? sampleRes.error.message : null,
+        });
+
+        console.log("[DB DEBUG] countRes:", countRes);
+        console.log("[DB DEBUG] sampleRes:", sampleRes);
+      } catch (e) {
+        if (!cancelled) {
+          setDbDebug({
+            totalCount: null,
+            sampleCount: null,
+            sampleFirst: null,
+            countError: String(e?.message || e),
+            sampleError: String(e?.message || e),
+          });
+        }
+      }
+    }
+
+    runDbDebug();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [usingSupabase, user?.id]);
+
   const {
     activity,
     historyOpen,
@@ -114,7 +251,6 @@ export default function App() {
     logActivity,
   } = useHistory({ storage, usingSupabase });
 
-  // vault (hook)
   const {
     entries,
     newEntry,
@@ -132,9 +268,13 @@ export default function App() {
     handleImport,
     handleExportEntries,
     handleExportCSV,
-  } = useVault({ storage, usingSupabase, logActivity });
+  } = useVault({
+    storage,
+    usingSupabase,
+    logActivity,
+    user,
+  });
 
-  // ui state
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
@@ -143,10 +283,9 @@ export default function App() {
       return "log";
     }
   });
+
   const [now, setNow] = useState(new Date());
   const tabStartRef = useRef(Date.now());
-
-  // timeline tuning with persistence
   const [showTimelineControls, setShowTimelineControls] = useState(false);
 
   const [timelineMinGap, setTimelineMinGap] = useState(() => {
@@ -167,7 +306,6 @@ export default function App() {
     }
   });
 
-  // persist active tab
   useEffect(() => {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
@@ -175,7 +313,6 @@ export default function App() {
     } catch {}
   }, [activeTab]);
 
-  // persist timeline tuning
   useEffect(() => {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
@@ -191,44 +328,59 @@ export default function App() {
     } catch {}
   }, [timelineMinGap, timelineTrackHeight]);
 
-  // clock
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  // shortcuts: save + jump to search
+  async function runSave() {
+    setLastError("");
+
+    if (usingSupabase && !user) {
+      setLastError("Please sign in first.");
+      return false;
+    }
+
+    const res = await handleSave();
+    if (!res?.ok) {
+      setLastError(res?.error || "Save failed.");
+      return false;
+    }
+
+    setActiveTab("archive");
+    return true;
+  }
+
   useEffect(() => {
     const onKey = async (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        setLastError("");
         try {
-          if (usingSupabase && !user) throw new Error("Please sign in first.");
-          const res = await handleSave();
-          if (!res?.ok) throw new Error(res?.error || "Save failed.");
-          setActiveTab("archive");
+          await runSave();
         } catch (err) {
-          console.error("[Save] error:", err);
+          console.error("[App] Save error:", err);
           setLastError(err?.message || String(err));
         }
       }
+
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
         setActiveTab("search");
       }
     };
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newEntry, selectedFile, searchTerm, entries, handleSave, usingSupabase, user]);
+  }, [handleSave, usingSupabase, user]);
 
-  // tab change logging
   const handleTab = (id) => {
     const nowTs = Date.now();
     const stayedMs = nowTs - tabStartRef.current;
+
     if (tabStartRef.current && activeTab) {
       logActivity(`Stayed on ${activeTab} for ${fmtDur(stayedMs)}`, "duration");
     }
+
     tabStartRef.current = nowTs;
     setActiveTab(id);
     logActivity(`Switched to ${id} tab`, "tab");
@@ -241,6 +393,34 @@ export default function App() {
           <LazyAuthGate />
         </Suspense>
       )}
+
+      <div
+        style={{
+          margin: "8px 0",
+          padding: "8px 10px",
+          border: "1px solid #d1d5db",
+          background: "#f9fafb",
+          color: "#111827",
+          borderRadius: 8,
+          fontSize: 12,
+          lineHeight: 1.5,
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        <div><strong>Driver:</strong> {debugInfo.driver}</div>
+        <div><strong>Using Supabase:</strong> {String(debugInfo.usingSupabase)}</div>
+        <div><strong>User Email:</strong> {debugInfo.userEmail || "none"}</div>
+        <div><strong>User ID:</strong> {debugInfo.userId || "none"}</div>
+        <div><strong>Entries Loaded:</strong> {entries.length}</div>
+        <div style={{ marginTop: 8 }}><strong>DB Count Query:</strong> {String(dbDebug.totalCount)}</div>
+        <div><strong>DB Sample Count:</strong> {String(dbDebug.sampleCount)}</div>
+        <div><strong>DB Count Error:</strong> {dbDebug.countError || "none"}</div>
+        <div><strong>DB Sample Error:</strong> {dbDebug.sampleError || "none"}</div>
+        <div style={{ marginTop: 8 }}>
+          <strong>DB First Sample Row:</strong>
+          <div>{dbDebug.sampleFirst || "none"}</div>
+        </div>
+      </div>
 
       {lastError && (
         <div
@@ -274,20 +454,7 @@ export default function App() {
             selectedFile={selectedFile}
             setSelectedFile={setSelectedFile}
             disabled={usingSupabase && !user}
-            handleSave={async () => {
-              try {
-                setLastError("");
-                if (usingSupabase && !user) throw new Error("Please sign in first.");
-                const res = await handleSave();
-                if (!res?.ok) throw new Error(res?.error || "Save failed.");
-                setActiveTab("archive");
-                return true;
-              } catch (e) {
-                console.error("[Save] error:", e);
-                setLastError(e?.message || String(e));
-                return false;
-              }
-            }}
+            handleSave={runSave}
             handleImport={handleImport}
           />
         </Card>
@@ -371,9 +538,7 @@ export default function App() {
       <EntryModal
         entry={selectedEntry}
         onClose={() => setSelectedEntry(null)}
-        onCopyText={() =>
-          navigator.clipboard.writeText(selectedEntry?.content || "")
-        }
+        onCopyText={() => navigator.clipboard.writeText(selectedEntry?.content || "")}
       />
 
       <HistoryDrawer
