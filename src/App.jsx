@@ -32,31 +32,12 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [lastError, setLastError] = useState("");
-  const [debugInfo, setDebugInfo] = useState({
-    driver: import.meta.env.VITE_STORAGE_DRIVER || "local",
-    usingSupabase: false,
-    userEmail: null,
-    userId: null,
-  });
-
-  const [dbDebug, setDbDebug] = useState({
-    totalCount: null,
-    sampleCount: null,
-    sampleFirst: null,
-    countError: null,
-    sampleError: null,
-  });
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       if (!wantsSupabase) {
-        setDebugInfo((prev) => ({
-          ...prev,
-          driver: "local",
-          usingSupabase: false,
-        }));
         return;
       }
 
@@ -69,25 +50,16 @@ export default function App() {
           setStorage(drv);
           setUsingSupabase(true);
           setAuthGateReady(true);
-          setDebugInfo((prev) => ({
-            ...prev,
-            driver: "supabase",
-            usingSupabase: true,
-          }));
         } else {
           console.warn("[App] Supabase driver missing default export; using local");
           setUsingSupabase(false);
           setAuthGateReady(false);
         }
       } catch (e) {
-        console.error("[App] Failed to load Supabase driver. Using local.", e);
+        console.error("[App] Failed to load Supabase driver.", e);
         setUsingSupabase(false);
         setAuthGateReady(false);
-        setDebugInfo((prev) => ({
-          ...prev,
-          driver: "local-fallback",
-          usingSupabase: false,
-        }));
+        setLastError(e?.message || "Supabase configuration failed.");
       }
     }
 
@@ -107,22 +79,10 @@ export default function App() {
         const currentUser = await storage.getUser?.();
         if (!cancelled) {
           setUser(currentUser || null);
-          setDebugInfo((prev) => ({
-            ...prev,
-            usingSupabase,
-            userEmail: currentUser?.email || null,
-            userId: currentUser?.id || null,
-          }));
         }
       } catch {
         if (!cancelled) {
           setUser(null);
-          setDebugInfo((prev) => ({
-            ...prev,
-            usingSupabase,
-            userEmail: null,
-            userId: null,
-          }));
         }
       }
 
@@ -131,21 +91,13 @@ export default function App() {
       try {
         const mod = await import("./services/storage/supabase.js");
         const sb = mod.supabaseClient;
-        const getDevUser = mod.getDevUser;
 
         if (!sb || cancelled) return;
 
         const { data } = sb.auth.onAuthStateChange(async (_event, session) => {
-          const devUser = typeof getDevUser === "function" ? getDevUser() : null;
-          const nextUser = session?.user || devUser || null;
+          const nextUser = session?.user || null;
 
           setUser(nextUser);
-          setDebugInfo((prev) => ({
-            ...prev,
-            usingSupabase: true,
-            userEmail: nextUser?.email || null,
-            userId: nextUser?.id || null,
-          }));
         });
 
         unsubscribeFn = data?.subscription?.unsubscribe?.bind(data.subscription);
@@ -155,16 +107,9 @@ export default function App() {
         } = await sb.auth.getUser();
 
         if (!cancelled) {
-          const devUser = typeof getDevUser === "function" ? getDevUser() : null;
-          const nextUser = authUser || devUser || null;
+          const nextUser = authUser || null;
 
           setUser(nextUser);
-          setDebugInfo((prev) => ({
-            ...prev,
-            usingSupabase: true,
-            userEmail: nextUser?.email || null,
-            userId: nextUser?.id || null,
-          }));
         }
       } catch (e) {
         console.warn("[App] Could not attach auth listener:", e?.message || e);
@@ -182,63 +127,6 @@ export default function App() {
       } catch {}
     };
   }, [storage, usingSupabase]);
-
-  // Direct DB debug from frontend
-  useEffect(() => {
-    let cancelled = false;
-
-    async function runDbDebug() {
-      if (!usingSupabase) return;
-
-      try {
-        const mod = await import("./services/storage/supabase.js");
-        const sb = mod.supabaseClient;
-        if (!sb || cancelled) return;
-
-        const countRes = await sb
-          .from("entries")
-          .select("*", { count: "exact", head: true });
-
-        const sampleRes = await sb
-          .from("entries")
-          .select("id, user_id, ts, date, content")
-          .order("ts", { ascending: false })
-          .limit(3);
-
-        if (cancelled) return;
-
-        setDbDebug({
-          totalCount: countRes.count ?? null,
-          sampleCount: Array.isArray(sampleRes.data) ? sampleRes.data.length : 0,
-          sampleFirst:
-            Array.isArray(sampleRes.data) && sampleRes.data.length > 0
-              ? JSON.stringify(sampleRes.data[0], null, 2)
-              : null,
-          countError: countRes.error ? countRes.error.message : null,
-          sampleError: sampleRes.error ? sampleRes.error.message : null,
-        });
-
-        console.log("[DB DEBUG] countRes:", countRes);
-        console.log("[DB DEBUG] sampleRes:", sampleRes);
-      } catch (e) {
-        if (!cancelled) {
-          setDbDebug({
-            totalCount: null,
-            sampleCount: null,
-            sampleFirst: null,
-            countError: String(e?.message || e),
-            sampleError: String(e?.message || e),
-          });
-        }
-      }
-    }
-
-    runDbDebug();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [usingSupabase, user?.id]);
 
   const {
     activity,
@@ -336,6 +224,11 @@ export default function App() {
   async function runSave() {
     setLastError("");
 
+    if (wantsSupabase && !usingSupabase) {
+      setLastError("Timedline cloud storage is unavailable. Nothing was saved.");
+      return false;
+    }
+
     if (usingSupabase && !user) {
       setLastError("Please sign in first.");
       return false;
@@ -394,34 +287,6 @@ export default function App() {
         </Suspense>
       )}
 
-      <div
-        style={{
-          margin: "8px 0",
-          padding: "8px 10px",
-          border: "1px solid #d1d5db",
-          background: "#f9fafb",
-          color: "#111827",
-          borderRadius: 8,
-          fontSize: 12,
-          lineHeight: 1.5,
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        <div><strong>Driver:</strong> {debugInfo.driver}</div>
-        <div><strong>Using Supabase:</strong> {String(debugInfo.usingSupabase)}</div>
-        <div><strong>User Email:</strong> {debugInfo.userEmail || "none"}</div>
-        <div><strong>User ID:</strong> {debugInfo.userId || "none"}</div>
-        <div><strong>Entries Loaded:</strong> {entries.length}</div>
-        <div style={{ marginTop: 8 }}><strong>DB Count Query:</strong> {String(dbDebug.totalCount)}</div>
-        <div><strong>DB Sample Count:</strong> {String(dbDebug.sampleCount)}</div>
-        <div><strong>DB Count Error:</strong> {dbDebug.countError || "none"}</div>
-        <div><strong>DB Sample Error:</strong> {dbDebug.sampleError || "none"}</div>
-        <div style={{ marginTop: 8 }}>
-          <strong>DB First Sample Row:</strong>
-          <div>{dbDebug.sampleFirst || "none"}</div>
-        </div>
-      </div>
-
       {lastError && (
         <div
           style={{
@@ -453,7 +318,7 @@ export default function App() {
             setNewEntry={setNewEntry}
             selectedFile={selectedFile}
             setSelectedFile={setSelectedFile}
-            disabled={usingSupabase && !user}
+            disabled={wantsSupabase && (!usingSupabase || !user)}
             handleSave={runSave}
             handleImport={handleImport}
           />

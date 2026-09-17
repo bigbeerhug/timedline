@@ -18,9 +18,10 @@ cp .env.example .env
 npm run dev
 ```
 
-Required variables:
+Required variables for cloud mode:
 
 ```text
+VITE_STORAGE_DRIVER=supabase
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 ```
@@ -36,4 +37,4 @@ Never commit `.env` files or privileged database keys.
 - Supabase is the durable backend for authentication, structured data, and media storage when cloud persistence is required.
 - Keep the Idea Stream data model independent from the interface so the navigation can evolve without losing ideas.
 
-See [docs/FOUNDATION.md](docs/FOUNDATION.md), [docs/IDEA_STREAM.md](docs/IDEA_STREAM.md), and [docs/DECISIONS.md](docs/DECISIONS.md).
+See [docs/FOUNDATION.md](docs/FOUNDATION.md), [docs/IDEA_STREAM.md](docs/IDEA_STREAM.md), [docs/DECISIONS.md](docs/DECISIONS.md), and [docs/SECURITY.md](docs/SECURITY.md).

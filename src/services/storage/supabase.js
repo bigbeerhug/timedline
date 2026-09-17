@@ -1,32 +1,24 @@
 // src/services/storage/supabase.js
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://eshnqnkjnsmszjfuvlyv.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVzaG5xbmtqbnNtc3pqZnV2bHl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NzUwNTksImV4cCI6MjA5MDU1MTA1OX0.8ISuGXznvOtwxFjLAeIOG2rsINZW6ql6kozjv6UW7wY";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  throw new Error(
+    "Supabase is selected, but VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing."
+  );
+}
 
 const BUCKET = "vault";
 const SIGNED_URL_TTL = 60 * 60;
-const DEV_USER_KEY = "timedline_dev_user";
-
-export const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-export function setDevUser(user) {
-  localStorage.setItem(DEV_USER_KEY, JSON.stringify(user));
-}
-
-export function getDevUser() {
-  try {
-    const raw = localStorage.getItem(DEV_USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function clearDevUser() {
-  localStorage.removeItem(DEV_USER_KEY);
-}
+export const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
 
 async function getUser() {
   try {
@@ -34,9 +26,9 @@ async function getUser() {
       data: { user },
     } = await supabaseClient.auth.getUser();
 
-    return user || getDevUser();
+    return user || null;
   } catch {
-    return getDevUser();
+    return null;
   }
 }
 

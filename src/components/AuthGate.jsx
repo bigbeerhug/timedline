@@ -1,19 +1,13 @@
 import { useEffect, useState } from "react";
-import {
-  getDevUser,
-  setDevUser,
-  clearDevUser,
-  supabaseClient,
-} from "../services/storage/supabase";
+import { supabaseClient } from "../services/storage/supabase";
 
-const DEV_USER = {
-  id: "3b022637-69ee-44eb-a3e9-0dd43810c331",
-  email: "paulson3680@gmail.com",
-};
-
-export default function DevAuthGate() {
+export default function AuthGate() {
   const [user, setUser] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -24,7 +18,7 @@ export default function DevAuthGate() {
       } = await supabaseClient.auth.getUser();
 
       if (!mounted) return;
-      setUser(authUser || getDevUser());
+      setUser(authUser || null);
     }
 
     loadUser();
@@ -32,7 +26,7 @@ export default function DevAuthGate() {
     const {
       data: { subscription },
     } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || getDevUser());
+      setUser(session?.user || null);
     });
 
     return () => {
@@ -41,21 +35,25 @@ export default function DevAuthGate() {
     };
   }, []);
 
-  const signIn = () => {
-    if (!import.meta.env.DEV) return;
-    setDevUser(DEV_USER);
-    setUser(DEV_USER);
-    setMenuOpen(false);
+  const signIn = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    setBusy(false);
+    if (error) setMessage(error.message);
   };
 
   const signOut = async () => {
-    clearDevUser();
     await supabaseClient.auth.signOut();
     setUser(null);
     setMenuOpen(false);
   };
-
-  if (!import.meta.env.DEV && !user) return null;
 
   const shell = { position: "fixed", top: 8, right: 8, zIndex: 50 };
   const panel = {
@@ -102,15 +100,7 @@ export default function DevAuthGate() {
         {menuOpen && (
           <div style={{ ...panel, marginTop: 8 }}>
             <div style={{ fontSize: 12, color: "#374151", marginBottom: 8 }}>
-              {import.meta.env.DEV ? (
-                <>
-                  Local dev mode as <strong>{user.email}</strong>
-                </>
-              ) : (
-                <>
-                  Signed in as <strong>{user.email}</strong>
-                </>
-              )}
+              Signed in as <strong>{user.email}</strong>
             </div>
             <button
               onClick={signOut}
@@ -133,17 +123,35 @@ export default function DevAuthGate() {
 
   return (
     <div style={shell}>
-      <div style={panel}>
+      <form style={panel} onSubmit={signIn}>
         <div style={{ display: "grid", gap: 8 }}>
           <div style={{ fontWeight: 600, fontSize: 13 }}>
-            Timedline local dev sign-in
+            Sign in to Timedline
           </div>
-          <div style={{ fontSize: 12, color: "#374151" }}>
-            This bypasses Supabase Auth for now and uses your restored data.
-          </div>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="Email"
+            autoComplete="email"
+            required
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="Password"
+            autoComplete="current-password"
+            required
+          />
+          {message && (
+            <div role="alert" style={{ fontSize: 12, color: "#991b1b" }}>
+              {message}
+            </div>
+          )}
           <button
-            type="button"
-            onClick={signIn}
+            type="submit"
+            disabled={busy}
             style={{
               padding: "8px 10px",
               borderRadius: 8,
@@ -153,10 +161,10 @@ export default function DevAuthGate() {
               fontWeight: 700,
             }}
           >
-            Continue
+            {busy ? "Signing in…" : "Sign in"}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
