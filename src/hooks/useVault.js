@@ -54,6 +54,11 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
   const [reloadTick, setReloadTick] = useState(0);
 
   const loadEntries = useCallback(async () => {
+    if (!storage) {
+      setEntries([]);
+      return;
+    }
+
     try {
       const list = await storage.listEntries();
       console.log("[vault] loaded entries:", list);
