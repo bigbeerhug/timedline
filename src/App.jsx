@@ -26,7 +26,9 @@ export default function App() {
   const wantsSupabase =
     (import.meta.env.VITE_STORAGE_DRIVER || "local").toLowerCase() === "supabase";
 
-  const [storage, setStorage] = useState(() => localDriver());
+  const [storage, setStorage] = useState(() =>
+    wantsSupabase ? null : localDriver()
+  );
   const [usingSupabase, setUsingSupabase] = useState(false);
   const [authGateReady, setAuthGateReady] = useState(false);
 
@@ -75,6 +77,8 @@ export default function App() {
     let unsubscribeFn = null;
 
     async function syncUser() {
+      if (!storage) return;
+
       try {
         const currentUser = await storage.getUser?.();
         if (!cancelled) {

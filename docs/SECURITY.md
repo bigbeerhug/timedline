@@ -11,6 +11,8 @@ Timedline must fail closed in cloud mode: an unavailable or misconfigured Supaba
 
 The browser-safe Supabase anon key is not a privileged service credential, but it still belongs in environment configuration. Database and storage access must be protected by authentication and row-level security rather than by concealing that key.
 
+The migration adds restrictive owner-boundary policies. PostgreSQL combines these with any older permissive policies using `AND`, preventing a legacy broad policy from bypassing record ownership while the old policies are inventoried. The storage boundary is limited to the `vault` bucket so unrelated buckets are not changed.
+
 ## Read-only preflight
 
 Run these queries in the Supabase SQL editor before applying the migration and save the results with the deployment record:

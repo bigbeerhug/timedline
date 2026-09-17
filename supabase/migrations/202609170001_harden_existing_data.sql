@@ -16,6 +16,15 @@ drop policy if exists "entries_select_own" on public.entries;
 drop policy if exists "entries_insert_own" on public.entries;
 drop policy if exists "entries_update_own" on public.entries;
 drop policy if exists "entries_delete_own" on public.entries;
+drop policy if exists "entries_owner_boundary" on public.entries;
+
+-- RESTRICTIVE boundaries are ANDed with any legacy permissive policies, so an
+-- older broad policy cannot bypass ownership while it is being inventoried.
+create policy "entries_owner_boundary"
+on public.entries as restrictive for all
+to public
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
 
 create policy "entries_select_own"
 on public.entries for select
@@ -42,6 +51,13 @@ drop policy if exists "activity_select_own" on public.activity;
 drop policy if exists "activity_insert_own" on public.activity;
 drop policy if exists "activity_update_own" on public.activity;
 drop policy if exists "activity_delete_own" on public.activity;
+drop policy if exists "activity_owner_boundary" on public.activity;
+
+create policy "activity_owner_boundary"
+on public.activity as restrictive for all
+to public
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
 
 create policy "activity_select_own"
 on public.activity for select
@@ -72,6 +88,19 @@ drop policy if exists "vault_select_own" on storage.objects;
 drop policy if exists "vault_insert_own" on storage.objects;
 drop policy if exists "vault_update_own" on storage.objects;
 drop policy if exists "vault_delete_own" on storage.objects;
+drop policy if exists "vault_owner_boundary" on storage.objects;
+
+create policy "vault_owner_boundary"
+on storage.objects as restrictive for all
+to public
+using (
+  bucket_id <> 'vault'
+  or (storage.foldername(name))[1] = auth.uid()::text
+)
+with check (
+  bucket_id <> 'vault'
+  or (storage.foldername(name))[1] = auth.uid()::text
+);
 
 create policy "vault_select_own"
 on storage.objects for select
