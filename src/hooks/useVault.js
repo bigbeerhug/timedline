@@ -249,6 +249,46 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     [storage, logActivity]
   );
 
+  const handleChronicleImport = useCallback(
+    async (file) => {
+      if (!file) {
+        return { ok: false, error: "Choose a Markdown or text Chronicle file." };
+      }
+
+      const isTextFile =
+        file.type === "text/markdown" ||
+        file.type === "text/plain" ||
+        /\.(md|markdown|txt)$/i.test(file.name || "");
+
+      if (!isTextFile) {
+        return {
+          ok: false,
+          error: "Chronicles must be Markdown (.md) or plain-text (.txt) files.",
+        };
+      }
+
+      try {
+        const text = await file.text();
+        if (!text.trim()) {
+          return { ok: false, error: "That Chronicle file is empty." };
+        }
+
+        setNewEntry(text);
+        setSelectedFile(file);
+        logActivity?.(`Prepared Chronicle for review: ${file.name}`, "open");
+
+        return { ok: true };
+      } catch (e) {
+        console.error("[vault] handleChronicleImport failed:", e);
+        return {
+          ok: false,
+          error: e?.message || "Could not read that Chronicle file.",
+        };
+      }
+    },
+    [logActivity]
+  );
+
   const filtered = useMemo(() => {
     const q = (searchTerm || "").trim().toLowerCase();
 
@@ -298,6 +338,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     handleSave,
     deleteEntry,
     handleImport,
+    handleChronicleImport,
     handleExportEntries,
     handleExportCSV,
   };

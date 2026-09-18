@@ -158,6 +158,7 @@ export default function App() {
     handleSave,
     deleteEntry,
     handleImport,
+    handleChronicleImport,
     handleExportEntries,
     handleExportCSV,
   } = useVault({
@@ -248,6 +249,18 @@ export default function App() {
     return true;
   }
 
+  async function prepareChronicle(file) {
+    setLastError("");
+    const res = await handleChronicleImport(file);
+
+    if (!res?.ok) {
+      setLastError(res?.error || "Could not prepare that Chronicle.");
+      return false;
+    }
+
+    return true;
+  }
+
   useEffect(() => {
     const onKey = async (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -325,6 +338,7 @@ export default function App() {
             disabled={wantsSupabase && (!usingSupabase || !user)}
             handleSave={runSave}
             handleImport={handleImport}
+            handleChronicleImport={prepareChronicle}
           />
         </Card>
       )}
