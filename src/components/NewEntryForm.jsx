@@ -6,9 +6,11 @@ export default function NewEntryForm({
   selectedFile, setSelectedFile,
   handleSave,
   handleImport,
+  handleChronicleImport,
   disabled = false,
 }) {
   const importFileRef = useRef(null);
+  const chronicleFileRef = useRef(null);
 
   const onFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -55,6 +57,33 @@ export default function NewEntryForm({
           </span>
         )}
         <button
+          type="button"
+          onClick={() => chronicleFileRef.current?.click()}
+          style={{
+            padding: "8px 10px",
+            borderRadius: 10,
+            border: "1px solid #4f46e5",
+            background: "#fff",
+            color: "#3730a3",
+            cursor: "pointer",
+            fontWeight: 600,
+          }}
+        >
+          Import Chronicle
+        </button>
+        <input
+          ref={chronicleFileRef}
+          type="file"
+          accept=".md,.markdown,.txt,text/markdown,text/plain"
+          style={{ display: "none" }}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            if (f) await handleChronicleImport(f);
+            e.target.value = "";
+          }}
+        />
+        <button
+          type="button"
           onClick={() => importFileRef.current?.click()}
           style={{
             padding: "8px 10px",
@@ -76,6 +105,10 @@ export default function NewEntryForm({
             if (f) handleImport(f);
           }}
         />
+      </div>
+      <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 12 }}>
+        Import Chronicle loads a Markdown or text session into the editor for
+        review. Nothing is saved until you choose Save Entry.
       </div>
       <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
         <input type="checkbox" disabled /> Lock in Vault Cell (Immutable) — (visual only in MVP)
