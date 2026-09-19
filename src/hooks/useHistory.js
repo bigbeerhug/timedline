@@ -10,13 +10,17 @@ export default function useHistory({ storage, usingSupabase }) {
     try {
       const fromLS = JSON.parse(localStorage.getItem(LS_ACTIVITY) || "null");
       if (Array.isArray(fromLS)) return fromLS;
-    } catch {}
+    } catch {
+      // Start with a fresh session when local history is unavailable.
+    }
     return [{ ts: Date.now(), type: "session", text: "Session started" }];
   });
 
   // persist to localStorage
   useEffect(() => {
-    try { localStorage.setItem(LS_ACTIVITY, JSON.stringify(activity)); } catch {}
+    try { localStorage.setItem(LS_ACTIVITY, JSON.stringify(activity)); } catch {
+      // History persistence is best effort in browsers that block storage.
+    }
   }, [activity]);
 
   // load from Supabase when signed in

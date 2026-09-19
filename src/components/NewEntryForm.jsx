@@ -8,6 +8,7 @@ export default function NewEntryForm({
   handleImport,
   handleChronicleImport,
   disabled = false,
+  saving = false,
 }) {
   const importFileRef = useRef(null);
   const chronicleFileRef = useRef(null);
@@ -18,127 +19,88 @@ export default function NewEntryForm({
   };
 
   return (
-    <div
-      style={{
-        border: "1px dashed #c7d2fe",
-        background: "#eef2ff",
-        padding: 12,
-        borderRadius: 12,
-        marginBottom: 12,
-      }}
-    >
+    <div className="idea-entry-form">
       <textarea
         value={newEntry}
         onChange={(e) => setNewEntry(e.target.value)}
-        placeholder="Write a diary, memo, rant, or note... (⌘/Ctrl+S to save)"
-        rows={4}
-        style={{
-          width: "100%",
-          borderRadius: 12,
-          border: "1px solid #ddd",
-          padding: 10,
-          marginBottom: 12,
-          fontFamily: "inherit",
-        }}
+        placeholder="Capture an idea, observation, question, plan, or anything you do not want to lose…"
+        rows={6}
+        autoFocus
       />
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-          marginBottom: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <input type="file" onChange={onFileChange} />
-        {selectedFile && (
-          <span style={{ fontSize: 12, color: "#374151" }}>
-            Selected: {selectedFile.name}
-          </span>
-        )}
+
+      <div className="idea-entry-form__actions">
         <button
           type="button"
-          onClick={() => chronicleFileRef.current?.click()}
-          style={{
-            padding: "8px 10px",
-            borderRadius: 10,
-            border: "1px solid #4f46e5",
-            background: "#fff",
-            color: "#3730a3",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          Import Chronicle
-        </button>
-        <input
-          ref={chronicleFileRef}
-          type="file"
-          accept=".md,.markdown,.txt,text/markdown,text/plain"
-          style={{ display: "none" }}
-          onChange={async (e) => {
-            const f = e.target.files?.[0];
-            if (f) await handleChronicleImport(f);
-            e.target.value = "";
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => importFileRef.current?.click()}
-          style={{
-            padding: "8px 10px",
-            borderRadius: 10,
-            border: "1px solid #ddd",
-            background: "#fff",
-            cursor: "pointer",
-          }}
-        >
-          Import JSON
-        </button>
-        <input
-          ref={importFileRef}
-          type="file"
-          accept="application/json"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleImport(f);
-          }}
-        />
-      </div>
-      <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 12 }}>
-        Import Chronicle loads a Markdown or text session into the editor for
-        review. Nothing is saved until you choose Save Entry.
-      </div>
-      <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-        <input type="checkbox" disabled /> Lock in Vault Cell (Immutable) — (visual only in MVP)
-      </label>
-      <div style={{ marginTop: 12 }}>
-        <button
           onClick={handleSave}
-          disabled={disabled}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 12,
-            border: "none",
-            background: disabled ? "#9ca3af" : "#4f46e5",
-            color: "#fff",
-            fontWeight: 600,
-            cursor: disabled ? "not-allowed" : "pointer",
-            opacity: disabled ? 0.7 : 1,
-          }}
+          disabled={disabled || saving || (!newEntry.trim() && !selectedFile)}
+          className="idea-entry-form__save"
         >
-          Save Entry
+          {saving ? "Saving securely…" : "Capture Idea"}
         </button>
+
+        <label className="idea-entry-form__attachment">
+          <span>Attach a file</span>
+          <input type="file" onChange={onFileChange} />
+        </label>
+
+        <span className="idea-entry-form__shortcut">⌘/Ctrl + S</span>
       </div>
+
+      {selectedFile && (
+        <div className="idea-entry-form__selected">
+          Selected: {selectedFile.name}
+        </div>
+      )}
+
       {disabled && (
-        <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+        <div className="idea-entry-form__notice">
           Sign in to save to your cloud vault.
         </div>
       )}
-      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-        Tip: drag & drop a file anywhere inside this blue box.
-      </div>
+
+      <details className="idea-entry-form__imports">
+        <summary>Import an existing archive</summary>
+        <div className="idea-entry-form__import-actions">
+          <button
+            type="button"
+            onClick={() => chronicleFileRef.current?.click()}
+          >
+            Import Chronicle
+          </button>
+          <input
+            ref={chronicleFileRef}
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) await handleChronicleImport(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => importFileRef.current?.click()}
+          >
+            Import JSON
+          </button>
+          <input
+            ref={importFileRef}
+            type="file"
+            accept="application/json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleImport(f);
+              e.target.value = "";
+            }}
+          />
+        </div>
+        <p>
+          Imports load into Timedline for review. Nothing is saved until you
+          choose Capture Idea.
+        </p>
+      </details>
     </div>
   );
 }

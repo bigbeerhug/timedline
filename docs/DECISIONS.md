@@ -17,3 +17,16 @@
 - Exact Idea Stream PostgreSQL schema and migration strategy
 - One-tap iPhone capture surface and offline queue behavior
 - Private ChatGPT connection for verified `create_idea` and retrieval actions
+
+## 2026-09-19 — Contained Idea Stream MVP
+
+- The first Direct Capture implementation remains a lens over the existing
+  authenticated `entries` collection instead of creating a second database or
+  prematurely freezing a new PostgreSQL schema.
+- A successful capture is acknowledged only after the active storage driver
+  returns the created record. In Supabase mode, the returned durable row ID is
+  presented as the permanent entry number.
+- The stream is newest-first, searchable, and expandable without requiring a
+  title, category, project, or other classification at capture time.
+- Existing entries and the imported Development Chronicle remain untouched;
+  this PR includes no production migration or data rewrite.

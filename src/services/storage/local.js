@@ -6,7 +6,9 @@ function readJSON(key, def) {
   try { return JSON.parse(localStorage.getItem(key) || "null") ?? def; } catch { return def; }
 }
 function writeJSON(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {
+    // Local mode remains usable in-memory when storage is unavailable.
+  }
 }
 
 export default function localDriver() {
@@ -20,22 +22,33 @@ export default function localDriver() {
 
     async createEntry(entry) {
       const list = readJSON(LS_ENTRIES, []);
+      const nextId = list.reduce((max, item) => {
+        const id = Number(item?.id);
+        return Number.isFinite(id) ? Math.max(max, id) : max;
+      }, 0) + 1;
       const cleaned = {
+        id: nextId,
         ts: entry.ts,
         date: entry.date,
         content: entry.content,
         file: entry.file ? { name: entry.file.name, type: entry.file.type, url: entry.file.url || null } : null,
       };
       writeJSON(LS_ENTRIES, [cleaned, ...list]);
+      return cleaned;
     },
 
     async listEntries() {
       return readJSON(LS_ENTRIES, []);
     },
 
-    async deleteEntry(ts /*, filePath*/) {
+    async deleteEntry(id /*, filePath*/) {
       const list = readJSON(LS_ENTRIES, []);
-      writeJSON(LS_ENTRIES, list.filter(x => x.ts !== ts));
+      writeJSON(
+        LS_ENTRIES,
+        list.filter((item) =>
+          item.id != null ? item.id !== id : item.ts !== id
+        )
+      );
     },
 
     async logActivity(item) {

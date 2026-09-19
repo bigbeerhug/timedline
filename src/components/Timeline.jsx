@@ -78,7 +78,9 @@ export default function Timeline({
       try {
         const u = URL.createObjectURL(file);
         return u; // remember to revoke when done
-      } catch {}
+      } catch {
+        // Blob URLs are a best-effort fallback for local previews.
+      }
     }
 
     return null;
@@ -91,7 +93,9 @@ export default function Timeline({
     const win = window.open(url, "_blank", "noopener,noreferrer");
     if (url.startsWith("blob:")) {
       setTimeout(() => {
-        try { URL.revokeObjectURL(url); } catch {}
+        try { URL.revokeObjectURL(url); } catch {
+          // The browser may have already released the temporary URL.
+        }
       }, 10000);
     }
     return win;
@@ -102,7 +106,9 @@ export default function Timeline({
 
     // revoke previous blob preview if any
     if (preview.src && preview.revoke && preview.src.startsWith("blob:")) {
-      try { URL.revokeObjectURL(preview.src); } catch {}
+      try { URL.revokeObjectURL(preview.src); } catch {
+        // The browser may have already released the temporary URL.
+      }
     }
 
     const url = await getAttachmentUrl(file);
@@ -120,7 +126,9 @@ export default function Timeline({
 
   const handlePreviewLeave = () => {
     if (preview.src && preview.revoke && preview.src.startsWith("blob:")) {
-      try { URL.revokeObjectURL(preview.src); } catch {}
+      try { URL.revokeObjectURL(preview.src); } catch {
+        // The browser may have already released the temporary URL.
+      }
     }
     setPreview({ src: null, top: 0, leftCss: "50%", revoke: false });
   };
