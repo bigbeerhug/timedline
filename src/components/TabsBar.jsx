@@ -13,10 +13,10 @@ export default function TabsBar({ activeTab, onTab }) {
     >
       <TabButton
         id="log"
-        label="✍️ Life Log"
+        label="💡 Idea Stream"
         active={activeTab === "log"}
         onClick={onTab}
-        title="Write or drop a file"
+        title="Capture and browse ideas"
       />
       <TabButton
         id="search"

@@ -1,11 +1,11 @@
 // src/App.jsx
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 
 import Layout from "./components/Layout";
 import HeaderBar from "./components/HeaderBar";
 import TabsBar from "./components/TabsBar";
 import Card from "./components/Card";
-import NewEntryForm from "./components/NewEntryForm";
+import IdeaStream from "./components/IdeaStream";
 import SearchPanel from "./components/SearchPanel";
 import ArchiveList from "./components/ArchiveList";
 import ArchiveActions from "./components/ArchiveActions";
@@ -34,6 +34,8 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [lastError, setLastError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,7 +130,9 @@ export default function App() {
         if (typeof unsubscribeFn === "function") {
           unsubscribeFn();
         }
-      } catch {}
+      } catch {
+        // The subscription may already be closed during teardown.
+      }
     };
   }, [storage, usingSupabase]);
 
@@ -203,7 +207,9 @@ export default function App() {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
       localStorage.setItem(LS_UI, JSON.stringify({ ...ui, activeTab }));
-    } catch {}
+    } catch {
+      // UI preferences are optional when browser storage is unavailable.
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -218,7 +224,9 @@ export default function App() {
         },
       };
       localStorage.setItem(LS_UI, JSON.stringify(next));
-    } catch {}
+    } catch {
+      // UI preferences are optional when browser storage is unavailable.
+    }
   }, [timelineMinGap, timelineTrackHeight]);
 
   useEffect(() => {
@@ -226,8 +234,9 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  async function runSave() {
+  const runSave = useCallback(async () => {
     setLastError("");
+    setSaveResult(null);
 
     if (wantsSupabase && !usingSupabase) {
       setLastError("Timedline cloud storage is unavailable. Nothing was saved.");
@@ -239,15 +248,25 @@ export default function App() {
       return false;
     }
 
-    const res = await handleSave();
-    if (!res?.ok) {
-      setLastError(res?.error || "Save failed.");
-      return false;
-    }
+    setSaving(true);
 
-    setActiveTab("archive");
-    return true;
-  }
+    try {
+      const res = await handleSave();
+      if (!res?.ok) {
+        setLastError(res?.error || "Save failed.");
+        return false;
+      }
+
+      setSaveResult({
+        ok: true,
+        number: res.entry?.id ?? null,
+        ts: res.entry?.ts ?? Date.now(),
+      });
+      return true;
+    } finally {
+      setSaving(false);
+    }
+  }, [handleSave, usingSupabase, user, wantsSupabase]);
 
   async function prepareChronicle(file) {
     setLastError("");
@@ -281,7 +300,7 @@ export default function App() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleSave, usingSupabase, user]);
+  }, [runSave]);
 
   const handleTab = (id) => {
     const nowTs = Date.now();
@@ -328,19 +347,23 @@ export default function App() {
       <TabsBar activeTab={activeTab} onTab={handleTab} />
 
       {activeTab === "log" && (
-        <Card>
-          <h2 style={{ marginTop: 0 }}>New Entry</h2>
-          <NewEntryForm
-            newEntry={newEntry}
-            setNewEntry={setNewEntry}
-            selectedFile={selectedFile}
-            setSelectedFile={setSelectedFile}
-            disabled={wantsSupabase && (!usingSupabase || !user)}
-            handleSave={runSave}
-            handleImport={handleImport}
-            handleChronicleImport={prepareChronicle}
-          />
-        </Card>
+        <IdeaStream
+          entries={entries}
+          newEntry={newEntry}
+          setNewEntry={setNewEntry}
+          selectedFile={selectedFile}
+          setSelectedFile={setSelectedFile}
+          disabled={wantsSupabase && (!usingSupabase || !user)}
+          saving={saving}
+          saveResult={saveResult}
+          handleSave={runSave}
+          handleImport={handleImport}
+          handleChronicleImport={prepareChronicle}
+          onOpen={(e) => {
+            setSelectedEntry(e);
+            logActivity(`Opened entry from ${e.date}`, "open");
+          }}
+        />
       )}
 
       {activeTab === "search" && (

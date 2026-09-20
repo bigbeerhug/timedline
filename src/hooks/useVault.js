@@ -76,7 +76,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     }
 
     loadEntries();
-  }, [loadEntries, usingSupabase, user?.id, reloadTick]);
+  }, [loadEntries, usingSupabase, user, reloadTick]);
 
   const handleSave = useCallback(async () => {
     const text = (newEntry || "").trim();
@@ -141,7 +141,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
         "save"
       );
 
-      return { ok: true };
+      return { ok: true, entry: normalizedEntry };
     } catch (e) {
       console.error("[vault] handleSave failed:", e);
 

@@ -51,7 +51,7 @@ async function uploadFile(file) {
   const user = await getUser();
   if (!user) throw new Error("Not signed in");
 
-  const safeName = (file.name || "file").replace(/[^\w.\-]/g, "_");
+  const safeName = (file.name || "file").replace(/[^\w.-]/g, "_");
   const path = `${user.id}/${Date.now()}-${safeName}`;
 
   const { error } = await supabaseClient.storage.from(BUCKET).upload(path, file, {
