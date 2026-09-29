@@ -55,66 +55,32 @@ export default function AuthGate() {
     setMenuOpen(false);
   };
 
-  const shell = { position: "fixed", top: 8, right: 8, zIndex: 50 };
-  const panel = {
-    background: "#ffffffcc",
-    backdropFilter: "blur(2px)",
-    border: "1px solid #e5e7eb",
-    borderRadius: 10,
-    padding: 12,
-    boxShadow: "0 6px 20px rgba(0,0,0,0.08)",
-    maxWidth: 380,
-  };
-  const pill = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "6px 10px",
-    background: "#ffffffcc",
-    border: "1px solid #e5e7eb",
-    borderRadius: 999,
-    cursor: "pointer",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
-  };
-
   if (user) {
     const display =
       user.email?.length > 24 ? `${user.email.slice(0, 24)}…` : user.email;
 
     return (
-      <div style={shell}>
-        <div
-          style={pill}
+      <div className="auth-shell">
+        <button
+          type="button"
+          className="auth-pill"
           onClick={() => setMenuOpen((v) => !v)}
           title={user.email}
+          aria-expanded={menuOpen}
         >
-          <span role="img" aria-label="user">
-            👤
-          </span>
+          <span className="auth-dot" aria-hidden="true" />
           <span style={{ fontSize: 13 }}>{display}</span>
           <span style={{ fontSize: 16, lineHeight: 1 }}>
             {menuOpen ? "▴" : "▾"}
           </span>
-        </div>
+        </button>
 
         {menuOpen && (
-          <div style={{ ...panel, marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: "#374151", marginBottom: 8 }}>
+          <div className="auth-panel">
+            <div className="auth-panel__identity">
               Signed in as <strong>{user.email}</strong>
             </div>
-            <button
-              onClick={signOut}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #ddd",
-                background: "#fff",
-                cursor: "pointer",
-                fontWeight: 600,
-              }}
-            >
-              Sign out
-            </button>
+            <button type="button" onClick={signOut}>Sign out</button>
           </div>
         )}
       </div>
@@ -122,49 +88,49 @@ export default function AuthGate() {
   }
 
   return (
-    <div style={shell}>
-      <form style={panel} onSubmit={signIn}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 600, fontSize: 13 }}>
-            Sign in to Timedline
+    <div className="auth-shell">
+      <button
+        type="button"
+        className="auth-pill"
+        onClick={() => setMenuOpen((value) => !value)}
+        aria-expanded={menuOpen}
+      >
+        <span className="auth-dot" aria-hidden="true" />
+        Sign in
+        <span aria-hidden="true">{menuOpen ? "▴" : "▾"}</span>
+      </button>
+      {menuOpen && (
+        <form className="auth-panel" onSubmit={signIn}>
+          <h2>Keep your vault close.</h2>
+          <p>Sign in to preserve memories in your private cloud vault.</p>
+          <div className="auth-panel__fields">
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="Email"
+              autoComplete="email"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              autoComplete="current-password"
+              required
+            />
+            {message && (
+              <div role="alert" className="auth-panel__error">
+                {message}
+              </div>
+            )}
+            <button type="submit" disabled={busy}>
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
           </div>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email"
-            autoComplete="email"
-            required
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            autoComplete="current-password"
-            required
-          />
-          {message && (
-            <div role="alert" style={{ fontSize: 12, color: "#991b1b" }}>
-              {message}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={busy}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid #ddd",
-              background: "#e5f3ff",
-              cursor: "pointer",
-              fontWeight: 700,
-            }}
-          >
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-        </div>
-      </form>
+        </form>
+      )}
     </div>
   );
 }

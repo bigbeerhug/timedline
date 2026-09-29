@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
-
+import { useEffect, useState } from "react";
 import NewEntryForm from "./NewEntryForm";
+
+const PAGE_SIZE = 25;
 
 function formatCapturedAt(ts) {
   const date = new Date(ts);
@@ -13,18 +14,7 @@ function formatCapturedAt(ts) {
   });
 }
 
-function displayNumber(entry) {
-  return entry?.id == null ? null : String(entry.id);
-}
-
-function excerpt(content, limit = 180) {
-  const value = String(content || "").trim();
-  if (value.length <= limit) return value;
-  return `${value.slice(0, limit).trimEnd()}…`;
-}
-
 export default function IdeaStream({
-  entries,
   newEntry,
   setNewEntry,
   selectedFile,
@@ -35,21 +25,20 @@ export default function IdeaStream({
   handleSave,
   handleImport,
   handleChronicleImport,
+  draftType,
+  ideas,
   onOpen,
+  onDelete,
 }) {
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLowerCase();
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(ideas.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const visibleIdeas = ideas.slice(start, start + PAGE_SIZE);
 
-  const visibleEntries = useMemo(() => {
-    if (!normalizedQuery) return entries;
-
-    return entries.filter((entry) => {
-      const number = displayNumber(entry) || "";
-      return [entry.content, entry.date, entry.file?.name, number]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(normalizedQuery));
-    });
-  }, [entries, normalizedQuery]);
+  useEffect(() => {
+    setPage(0);
+  }, [ideas.length]);
 
   return (
     <div className="idea-stream">
@@ -59,7 +48,9 @@ export default function IdeaStream({
             <p className="idea-kicker">Capture first. Organize later.</p>
             <h2 id="idea-capture-title">What are you thinking?</h2>
           </div>
-          <span className="idea-capture__storage">Saved to your Timedline</span>
+          <span className="idea-capture__storage">
+            {disabled ? "Sign in to preserve" : "Vault ready"}
+          </span>
         </div>
 
         <NewEntryForm
@@ -72,14 +63,17 @@ export default function IdeaStream({
           handleSave={handleSave}
           handleImport={handleImport}
           handleChronicleImport={handleChronicleImport}
+          draftType={draftType}
         />
 
         {saveResult?.ok && (
           <div className="idea-save-result" role="status">
             <strong>
-              {saveResult.number
-                ? `Saved as Idea #${saveResult.number}`
-                : "Idea saved"}
+              {saveResult.type === "chronicle"
+                ? "Chronicle saved"
+                : saveResult.number
+                  ? `Saved as Idea #${saveResult.number}`
+                  : "Idea saved"}
             </strong>
             <span>{formatCapturedAt(saveResult.ts)}</span>
           </div>
@@ -89,63 +83,62 @@ export default function IdeaStream({
       <section className="idea-stream__feed" aria-labelledby="idea-stream-title">
         <div className="idea-stream__toolbar">
           <div>
-            <p className="idea-kicker">Newest first</p>
+            <p className="idea-kicker">Captured ideas only</p>
             <h2 id="idea-stream-title">Idea Stream</h2>
           </div>
-          <label className="idea-search">
-            <span className="sr-only">Search the Idea Stream</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search ideas, dates, files, or numbers"
-            />
-          </label>
         </div>
+        <p className="idea-stream__count">
+          {ideas.length} idea{ideas.length === 1 ? "" : "s"}
+        </p>
 
-        <div className="idea-stream__count">
-          {visibleEntries.length} {visibleEntries.length === 1 ? "entry" : "entries"}
-          {normalizedQuery ? " found" : " preserved"}
-        </div>
+        {ideas.length > 0 && (
+          <div className="result-window" aria-live="polite">
+            <span>{start + 1}–{Math.min(start + PAGE_SIZE, ideas.length)} / {ideas.length}</span>
+            <div className="result-window__actions">
+              <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={safePage === 0}>Previous</button>
+              <span>Page {safePage + 1} of {pageCount}</span>
+              <button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={safePage >= pageCount - 1}>Next</button>
+            </div>
+          </div>
+        )}
 
         <div className="idea-list">
-          {visibleEntries.map((entry) => {
-            const number = displayNumber(entry);
-
-            return (
-              <details className="idea-item" key={entry.id ?? entry.ts}>
-                <summary>
-                  <div className="idea-item__identity">
-                    <span className="idea-item__number">
-                      {number ? `#${number}` : "Saved entry"}
-                    </span>
-                    <time dateTime={new Date(entry.ts).toISOString()}>
-                      {formatCapturedAt(entry.ts)}
-                    </time>
-                  </div>
-                  <div className="idea-item__excerpt">
-                    {excerpt(entry.content) || entry.file?.name || "File capture"}
-                  </div>
-                </summary>
-
-                <div className="idea-item__details">
-                  <div className="idea-item__content">{entry.content}</div>
-                  {entry.file?.name && (
-                    <div className="idea-item__file">Attachment: {entry.file.name}</div>
-                  )}
-                  <button type="button" onClick={() => onOpen?.(entry)}>
-                    Open full entry
-                  </button>
+          {visibleIdeas.map((idea, index) => (
+            <details className="idea-item" key={idea.id ?? `${idea.ts}-${index}`}>
+              <summary>
+                <span className="idea-item__identity">
+                  <span className="idea-item__number">
+                    {idea.id != null ? `Idea #${idea.id}` : "Idea"}
+                  </span>
+                  <span>{formatCapturedAt(idea.ts)}</span>
+                </span>
+                <span className="idea-item__excerpt">
+                  {idea.content || idea.file?.name || "Untitled idea"}
+                </span>
+              </summary>
+              <div className="idea-item__details">
+                <div className="idea-item__content">
+                  {idea.content || "No text was captured."}
                 </div>
-              </details>
-            );
-          })}
+                {idea.file && (
+                  <div className="idea-item__file">
+                    Attachment: {idea.file.name || "File"}
+                  </div>
+                )}
+                <button type="button" onClick={() => onOpen?.(idea)}>
+                  Open idea
+                </button>
+                <button type="button" onClick={() => onDelete?.(idea)}>
+                  Delete
+                </button>
+              </div>
+            </details>
+          ))}
 
-          {visibleEntries.length === 0 && (
+          {ideas.length === 0 && (
             <div className="idea-empty">
-              {normalizedQuery
-                ? "No preserved entries match that search."
-                : "Your first captured idea will appear here."}
+              No captured ideas yet. Unclassified legacy entries remain in the
+              Timeline and Archive until you choose how to classify them.
             </div>
           )}
         </div>

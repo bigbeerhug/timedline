@@ -30,6 +30,7 @@ export default function localDriver() {
         id: nextId,
         ts: entry.ts,
         date: entry.date,
+        type: entry.type ?? null,
         content: entry.content,
         file: entry.file ? { name: entry.file.name, type: entry.file.type, url: entry.file.url || null } : null,
       };

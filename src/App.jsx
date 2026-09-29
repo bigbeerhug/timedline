@@ -1,11 +1,12 @@
 // src/App.jsx
-import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 
 import Layout from "./components/Layout";
 import HeaderBar from "./components/HeaderBar";
 import TabsBar from "./components/TabsBar";
 import Card from "./components/Card";
 import IdeaStream from "./components/IdeaStream";
+import NewEntryForm from "./components/NewEntryForm";
 import SearchPanel from "./components/SearchPanel";
 import ArchiveList from "./components/ArchiveList";
 import ArchiveActions from "./components/ArchiveActions";
@@ -149,15 +150,22 @@ export default function App() {
 
   const {
     entries,
+    loadError,
     newEntry,
     setNewEntry,
     selectedFile,
     setSelectedFile,
+    draftType,
+    noteDraft,
+    setNoteDraft,
+    noteFile,
+    setNoteFile,
     searchTerm,
     setSearchTerm,
     selectedEntry,
     setSelectedEntry,
     filtered,
+    ideas,
     groupedByDate,
     handleSave,
     deleteEntry,
@@ -165,6 +173,8 @@ export default function App() {
     handleChronicleImport,
     handleExportEntries,
     handleExportCSV,
+    reload,
+    loading,
   } = useVault({
     storage,
     usingSupabase,
@@ -172,12 +182,33 @@ export default function App() {
     user,
   });
 
+  const vaultStats = useMemo(
+    () => ({
+      records: entries.length,
+      ideas: ideas.length,
+      dates: groupedByDate.length,
+      files: entries.reduce((count, entry) => count + (entry.file ? 1 : 0), 0),
+    }),
+    [entries, groupedByDate.length, ideas.length]
+  );
+
+  const timelineEntries = useMemo(
+    () =>
+      [...entries]
+        .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0))
+        .slice(0, 500),
+    [entries]
+  );
+
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
-      return ui.activeTab || "log";
+      return ui.viewModeVersion === 2 &&
+        ["timeline", "log", "search", "archive"].includes(ui.activeTab)
+        ? ui.activeTab
+        : "timeline";
     } catch {
-      return "log";
+      return "timeline";
     }
   });
 
@@ -206,7 +237,7 @@ export default function App() {
   useEffect(() => {
     try {
       const ui = JSON.parse(localStorage.getItem(LS_UI) || "{}");
-      localStorage.setItem(LS_UI, JSON.stringify({ ...ui, activeTab }));
+      localStorage.setItem(LS_UI, JSON.stringify({ ...ui, activeTab, viewModeVersion: 2 }));
     } catch {
       // UI preferences are optional when browser storage is unavailable.
     }
@@ -234,7 +265,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  const runSave = useCallback(async () => {
+  const runSave = useCallback(async (saveAsNote = false) => {
     setLastError("");
     setSaveResult(null);
 
@@ -251,9 +282,14 @@ export default function App() {
     setSaving(true);
 
     try {
-      const res = await handleSave();
+      const res = await handleSave(saveAsNote);
       if (!res?.ok) {
-        setLastError(res?.error || "Save failed.");
+        const error = res?.error || "Save failed.";
+        setLastError(
+          error.includes("'type' column")
+            ? "This cloud vault is missing entry classification. Nothing was saved. The existing entry-type migration must be applied before cloud captures can be saved."
+            : error
+        );
         return false;
       }
 
@@ -261,6 +297,7 @@ export default function App() {
         ok: true,
         number: res.entry?.id ?? null,
         ts: res.entry?.ts ?? Date.now(),
+        type: res.entry?.type ?? null,
       });
       return true;
     } finally {
@@ -285,7 +322,9 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         try {
-          await runSave();
+          if (activeTab === "timeline" || activeTab === "log") {
+            await runSave(activeTab === "timeline");
+          }
         } catch (err) {
           console.error("[App] Save error:", err);
           setLastError(err?.message || String(err));
@@ -300,7 +339,7 @@ export default function App() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [runSave]);
+  }, [runSave, activeTab]);
 
   const handleTab = (id) => {
     const nowTs = Date.now();
@@ -315,6 +354,16 @@ export default function App() {
     logActivity(`Switched to ${id} tab`, "tab");
   };
 
+  async function handleDelete(entry) {
+    const label = entry.content || entry.file?.name || "this memory";
+    if (!window.confirm(`Delete “${label.slice(0, 60)}” permanently?`)) return;
+    try {
+      await deleteEntry(entry);
+    } catch (error) {
+      setLastError(error?.message || "Could not delete that memory.");
+    }
+  }
+
   return (
     <Layout>
       {usingSupabase && authGateReady && (
@@ -323,123 +372,163 @@ export default function App() {
         </Suspense>
       )}
 
-      {lastError && (
-        <div
-          style={{
-            margin: "8px 0 0",
-            padding: "8px 10px",
-            border: "1px solid #fecaca",
-            background: "#fee2e2",
-            color: "#7f1d1d",
-            borderRadius: 8,
-          }}
-        >
-          {lastError}
-        </div>
-      )}
+      <main className="app-main">
+        {lastError && (
+          <div className="notice notice--error" role="alert">
+            <span className="notice__mark">!</span>
+            <span>{lastError}</span>
+          </div>
+        )}
+        {loadError && (
+          <div className="notice notice--error" role="alert">
+            <span className="notice__mark">!</span>
+            <span>We could not load the vault. {loadError}</span>
+            <button className="secondary-button" onClick={reload}>Try again</button>
+          </div>
+        )}
 
-      <HeaderBar
-        onExportJSON={handleExportEntries}
-        onExportCSV={handleExportCSV}
-        onOpenHistory={() => setHistoryOpen(true)}
-      />
-
-      <TabsBar activeTab={activeTab} onTab={handleTab} />
-
-      {activeTab === "log" && (
-        <IdeaStream
-          entries={entries}
-          newEntry={newEntry}
-          setNewEntry={setNewEntry}
-          selectedFile={selectedFile}
-          setSelectedFile={setSelectedFile}
-          disabled={wantsSupabase && (!usingSupabase || !user)}
-          saving={saving}
-          saveResult={saveResult}
-          handleSave={runSave}
-          handleImport={handleImport}
-          handleChronicleImport={prepareChronicle}
-          onOpen={(e) => {
-            setSelectedEntry(e);
-            logActivity(`Opened entry from ${e.date}`, "open");
-          }}
+        <HeaderBar
+          now={now}
+          onExportJSON={handleExportEntries}
+          onExportCSV={handleExportCSV}
+          onOpenHistory={() => setHistoryOpen(true)}
         />
-      )}
 
-      {activeTab === "search" && (
-        <Card>
-          <h2 style={{ marginTop: 0 }}>Search</h2>
-          <SearchPanel
-            searchTerm={searchTerm}
-            setSearchTerm={setSearchTerm}
-            filtered={filtered}
+        <TabsBar activeTab={activeTab} onTab={handleTab} counts={{ total: entries.length, entries: ideas.length, days: groupedByDate.length }} />
+
+        <section className="stats-board" aria-label="Vault statistics">
+          <div><span className="stats-board__label">RECORDS</span><strong>{vaultStats.records}</strong><small>all types</small></div>
+          <div><span className="stats-board__label">IDEAS</span><strong>{vaultStats.ideas}</strong><small>durable capture</small></div>
+          <div><span className="stats-board__label">DATES</span><strong>{vaultStats.dates}</strong><small>active dates</small></div>
+          <div><span className="stats-board__label">FILES</span><strong>{vaultStats.files}</strong><small>attachments</small></div>
+        </section>
+
+        {loading && (
+          <div className="loading-strip" role="status">
+            <span className="loading-strip__pulse" /> INDEXING VAULT / loading records
+          </div>
+        )}
+
+        {activeTab === "log" && (
+          <IdeaStream
+            newEntry={newEntry}
+            setNewEntry={setNewEntry}
+            selectedFile={selectedFile}
+            setSelectedFile={setSelectedFile}
+            disabled={wantsSupabase && (!usingSupabase || !user)}
+            saving={saving}
+            saveResult={saveResult?.type === "idea" || saveResult?.type === "chronicle" ? saveResult : null}
+            handleSave={() => runSave(false)}
+            handleImport={handleImport}
+            handleChronicleImport={prepareChronicle}
+            draftType={draftType}
+            ideas={ideas}
             onOpen={(e) => {
               setSelectedEntry(e);
-              logActivity(`Opened entry from ${e.date}`, "open");
+              logActivity(`Opened idea from ${e.date}`, "open");
             }}
-            onLogSearch={() => logActivity(`Searched: "${searchTerm}"`, "search")}
-            onDelete={(e) => deleteEntry(e)}
-          />
-        </Card>
-      )}
-
-      {activeTab === "archive" && (
-        <Card>
-          <h2 style={{ marginTop: 0 }}>Archive Timeline</h2>
-          <ArchiveList
-            groupedByDate={groupedByDate}
-            onOpen={(e) => {
-              setSelectedEntry(e);
-              logActivity(`Opened entry from ${e.date}`, "open");
-            }}
-            onDelete={(e) => deleteEntry(e)}
-          />
-          <ArchiveActions
-            onExportJSON={handleExportEntries}
-            onExportCSV={handleExportCSV}
-          />
-        </Card>
-      )}
-
-      <Card>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button
-            onClick={() => setShowTimelineControls((v) => !v)}
-            style={{
-              marginBottom: 8,
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              background: showTimelineControls ? "#eef2ff" : "#f9fafb",
-              cursor: "pointer",
-            }}
-          >
-            {showTimelineControls ? "Hide Timeline Controls" : "Show Timeline Controls"}
-          </button>
-        </div>
-
-        {showTimelineControls && (
-          <TimelineControls
-            minGap={timelineMinGap}
-            trackHeight={timelineTrackHeight}
-            onChange={(patch) => {
-              if (patch.minGap !== undefined) setTimelineMinGap(patch.minGap);
-              if (patch.trackHeight !== undefined) setTimelineTrackHeight(patch.trackHeight);
-            }}
+            onDelete={handleDelete}
           />
         )}
 
-        <Timeline
-          entries={entries}
-          now={now}
-          onOpen={(e) => {
-            setSelectedEntry(e);
-            logActivity(`Opened entry from ${e.date}`, "open");
-          }}
-          minGap={timelineMinGap}
-          trackHeight={timelineTrackHeight}
-        />
-      </Card>
+        {activeTab === "search" && (
+          <Card className="content-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Find what you meant to keep</p>
+                <h2 className="section-title">Search the vault</h2>
+              </div>
+              <span className="panel-heading__meta">{filtered.length} result{filtered.length === 1 ? "" : "s"}</span>
+            </div>
+            <SearchPanel
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              filtered={filtered}
+              onOpen={(e) => {
+                setSelectedEntry(e);
+                logActivity(`Opened entry from ${e.date}`, "open");
+              }}
+              onLogSearch={() => logActivity(`Searched: "${searchTerm}"`, "search")}
+              onDelete={handleDelete}
+            />
+          </Card>
+        )}
+
+        {activeTab === "archive" && (
+          <Card className="content-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">The long view</p>
+                <h2 className="section-title">Archive</h2>
+              </div>
+              <span className="panel-heading__meta">{groupedByDate.length} day{groupedByDate.length === 1 ? "" : "s"} of memory</span>
+            </div>
+            <ArchiveList
+              groupedByDate={groupedByDate}
+              onOpen={(e) => {
+                setSelectedEntry(e);
+                logActivity(`Opened entry from ${e.date}`, "open");
+              }}
+              onDelete={handleDelete}
+            />
+            <ArchiveActions onExportJSON={handleExportEntries} onExportCSV={handleExportCSV} />
+          </Card>
+        )}
+
+        {activeTab === "timeline" && <Card className="timeline-card">
+          <div className="section-card__inner">
+            <details className="timeline-capture">
+              <summary>+ New regular entry</summary>
+              <NewEntryForm
+                newEntry={noteDraft}
+                setNewEntry={setNoteDraft}
+                selectedFile={noteFile}
+                setSelectedFile={setNoteFile}
+                draftType="note"
+                disabled={wantsSupabase && (!usingSupabase || !user)}
+                saving={saving}
+                handleSave={() => runSave(true)}
+                showImports={false}
+                focusOnMount={false}
+                placeholder="Record a memory, event, or file in your Timeline…"
+              />
+            </details>
+            {saveResult?.ok && saveResult.type === "note" && (
+              <div className="idea-save-result" role="status">
+                Entry saved to the Timeline.
+              </div>
+            )}
+            <div className="timeline-actions" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+              <button className="utility-button" onClick={() => setShowTimelineControls((v) => !v)} aria-expanded={showTimelineControls}>
+                {showTimelineControls ? "Hide display controls" : "Display controls"}
+              </button>
+            </div>
+
+            {showTimelineControls && (
+              <TimelineControls
+                minGap={timelineMinGap}
+                trackHeight={timelineTrackHeight}
+                onChange={(patch) => {
+                  if (patch.minGap !== undefined) setTimelineMinGap(patch.minGap);
+                  if (patch.trackHeight !== undefined) setTimelineTrackHeight(patch.trackHeight);
+                }}
+              />
+            )}
+
+            <Timeline
+              entries={timelineEntries}
+              totalCount={entries.length}
+              now={now}
+              onOpen={(e) => {
+                setSelectedEntry(e);
+                logActivity(`Opened entry from ${e.date}`, "open");
+              }}
+              minGap={timelineMinGap}
+              trackHeight={timelineTrackHeight}
+            />
+          </div>
+        </Card>}
+      </main>
 
       <EntryModal
         entry={selectedEntry}

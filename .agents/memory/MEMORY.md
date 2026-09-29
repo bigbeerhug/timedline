@@ -1,0 +1,1 @@
+- [External Supabase schema](external-supabase-schema.md) — a merged migration file does not mean the connected Supabase schema was updated; verify before relying on new columns.

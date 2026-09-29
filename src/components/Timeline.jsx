@@ -1,7 +1,6 @@
 // src/components/Timeline.jsx
 import { useRef, useState } from "react";
 import { fmtTime12, fmtShort } from "../lib/time";
-import { getIcon } from "../lib/icons";
 
 export default function Timeline({
   entries,
@@ -10,6 +9,7 @@ export default function Timeline({
   trackHeight = 400,
   minGap = 24,
   newestFirst = true,
+  totalCount = entries.length,
 }) {
   const containerRef = useRef(null);
 
@@ -203,93 +203,36 @@ export default function Timeline({
   }
 
   return (
-    <div>
+    <div className="timeline">
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <h2 style={{ marginTop: 0 }}>Live Timedline</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              fontVariantNumeric: "tabular-nums",
-              color: "#4f46e5",
-              fontWeight: 700,
-              minWidth: 86,
-              textAlign: "right",
-            }}
-          >
-            {fmtTime12(now)}
-          </div>
-          <button
-            onClick={jumpToNewest}
-            title="Scroll to newest"
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              background: "#f9fafb",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Jump to newest
-          </button>
+      <div className="timeline-card__header">
+        <div>
+          <p className="eyebrow">One chronology</p>
+          <h2 className="section-title">The Timedline</h2>
+          <p className="timeline-subtitle">
+            {entries.length < totalCount
+              ? `Latest ${entries.length.toLocaleString()} of ${totalCount.toLocaleString()} records`
+              : `${totalCount.toLocaleString()} chronological records`}
+          </p>
+        </div>
+        <div className="timeline-actions">
+          <span className="timeline-clock">{fmtTime12(now)}</span>
+          <button className="secondary-button" onClick={jumpToNewest} title="Scroll to newest" disabled={!entries.length}>Newest</button>
         </div>
       </div>
 
       {/* Track */}
-      <div
-        ref={containerRef}
-        style={{ position: "relative", minHeight: containerHeight, marginTop: 8 }}
-      >
+      {entries.length === 0 ? (
+        <div className="timeline-empty" role="status">
+          No entries yet. Use “New regular entry” to begin your Timeline, or capture an idea in Idea Stream.
+        </div>
+      ) : <div ref={containerRef} className="timeline-track" style={{ minHeight: containerHeight }}>
         {/* vertical center line */}
-        <div
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: 0,
-            transform: "translateX(-1px)",
-            width: 2,
-            height: "100%",
-            background: "#e5e7eb",
-            zIndex: 0,
-          }}
-        />
-
         {/* day separators */}
         {separators.map((s, idx) => (
           <div key={`sep-${idx}`}>
-            <div
-              style={{
-                position: "absolute",
-                top: s.top,
-                left: 0,
-                right: 0,
-                borderTop: "1px dashed #f1f5f9",
-                zIndex: 0,
-              }}
-            />
-            <div
-              style={{
-                position: "absolute",
-                top: s.top,
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                padding: "2px 8px",
-                borderRadius: 999,
-                border: "1px solid #e5e7eb",
-                background: "#fff",
-                color: "#374151",
-                fontSize: 12,
-                zIndex: 1,
-              }}
-            >
+            <div className="timeline-separator-line" style={{ top: s.top }} />
+            <div className="timeline-separator-label" style={{ top: s.top }}>
               {s.label}
             </div>
           </div>
@@ -297,58 +240,23 @@ export default function Timeline({
 
         {/* entries */}
         {positioned.map(({ e, i, top, side, filePresent }) => {
-          const boxStyle = {
-            position: "absolute",
-            top,
-            [side]: "52%",
-            maxWidth: 320,
-            background: "#fff",
-            border: "1px solid #eee",
-            borderRadius: 12,
-            padding: 12,
-            boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-            cursor: "pointer",
-            transition: "all 0.3s ease",
-            zIndex: 2,
-          };
+          const boxStyle = { top, [side]: "52%" };
 
           return (
             <div key={e.ts || i}>
               {/* dot */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: top + 6,
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  width: 12,
-                  height: 12,
-                  borderRadius: "9999px",
-                  background: "#4f46e5",
-                  boxShadow: "0 0 8px rgba(79,70,229,0.4)",
-                  zIndex: 1,
-                }}
-              />
+              <div className="timeline-point" style={{ top: top + 6 }} />
               {/* card */}
-              <div style={boxStyle} onClick={() => onOpen?.(e)}>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+              <button className="timeline-entry" style={boxStyle} onClick={() => onOpen?.(e)}>
+                <div className="timeline-entry__meta">
                   {e.date} • {fmtShort(e.ts)}
                 </div>
-                <div style={{ fontWeight: 600, color: "#111827" }}>
-                  {getIcon(e)} {e.content}
-                </div>
+                <div className="timeline-entry__text">{e.content || e.file?.name || "Untitled memory"}</div>
 
                 {/* Attachment chip */}
                 {filePresent && (
                   <div
-                    style={{
-                      marginTop: 8,
-                      display: "inline-flex",
-                      gap: 8,
-                      alignItems: "center",
-                      fontSize: 12,
-                      color: "#374151",
-                    }}
+                    className="timeline-entry__file"
                     onClick={(evt) => {
                       evt.stopPropagation();
                       handleOpenAttachment(e.file);
@@ -356,45 +264,17 @@ export default function Timeline({
                     onMouseEnter={() => handlePreviewEnter(e.file, side, top)}
                     onMouseLeave={handlePreviewLeave}
                   >
-                    <span
-                      style={{
-                        padding: "2px 6px",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: 999,
-                        background: "#f9fafb",
-                        cursor: "pointer",
-                      }}
-                      title="Open attachment"
-                    >
-                      📎 Open
-                    </span>
-                    <span style={{ color: "#6b7280" }}>
-                      {e.file?.name || "Attachment"}
-                    </span>
+                    <span title="Open attachment">Open file · {e.file?.name || "Attachment"}</span>
                   </div>
                 )}
-              </div>
+              </button>
             </div>
           );
         })}
 
         {/* hover image preview */}
         {preview.src && (
-          <div
-            style={{
-              position: "absolute",
-              top: preview.top,
-              left: preview.leftCss,
-              transform: "translateY(-8px)",
-              padding: 6,
-              borderRadius: 8,
-              background: "#fff",
-              border: "1px solid #e5e7eb",
-              boxShadow: "0 8px 20px rgba(0,0,0,0.12)",
-              zIndex: 30,
-              pointerEvents: "none",
-            }}
-          >
+          <div className="timeline-preview" style={{ position: "absolute", top: preview.top, left: preview.leftCss }}>
             <img
               src={preview.src}
               alt="preview"
@@ -402,7 +282,7 @@ export default function Timeline({
             />
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

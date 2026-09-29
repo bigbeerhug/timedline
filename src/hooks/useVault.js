@@ -21,11 +21,12 @@ function csvEscape(v) {
 }
 
 function exportCSV(entries, filename) {
-  const header = ["id", "ts", "date", "content", "file_name", "file_type", "file_url"];
+  const header = ["id", "ts", "date", "type", "content", "file_name", "file_type", "file_url"];
   const rows = entries.map((e) => [
     e.id ?? "",
     e.ts,
     e.date,
+    e.type ?? "",
     e.content ?? "",
     e.file?.name ?? "",
     e.file?.type ?? "",
@@ -49,23 +50,33 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
   const [entries, setEntries] = useState([]);
   const [newEntry, setNewEntry] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
+  const [draftType, setDraftType] = useState("idea");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteFile, setNoteFile] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [reloadTick, setReloadTick] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const loadEntries = useCallback(async () => {
     if (!storage) {
       setEntries([]);
+      setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setLoadError("");
     try {
       const list = await storage.listEntries();
-      console.log("[vault] loaded entries:", list);
       setEntries(Array.isArray(list) ? list : []);
     } catch (e) {
       console.error("[vault] loadEntries failed:", e);
       setEntries([]);
+      setLoadError(e?.message || "Could not load your vault.");
+    } finally {
+      setLoading(false);
     }
   }, [storage]);
 
@@ -78,10 +89,13 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     loadEntries();
   }, [loadEntries, usingSupabase, user, reloadTick]);
 
-  const handleSave = useCallback(async () => {
-    const text = (newEntry || "").trim();
+  const handleSave = useCallback(async (saveAsNote = false) => {
+    const content = saveAsNote ? noteDraft : newEntry;
+    const file = saveAsNote ? noteFile : selectedFile;
+    const entryType = saveAsNote ? "note" : draftType;
+    const text = (content || "").trim();
 
-    if (!text && !selectedFile) {
+    if (!text && !file) {
       return { ok: false, error: "Nothing to save — add text or attach a file." };
     }
 
@@ -92,21 +106,22 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     let uploadedFile = null;
 
     try {
-      if (selectedFile) {
-        uploadedFile = await storage.uploadFile(selectedFile);
+      if (file) {
+        uploadedFile = await storage.uploadFile(file);
       }
 
       const created = await storage.createEntry({
         ts,
         date: today,
-        content: text || selectedFile?.name || "(file)",
+        type: entryType,
+        content: text || file?.name || "(file)",
         file: uploadedFile
           ? {
               path: uploadedFile.path || null,
-              name: uploadedFile.name || selectedFile?.name || null,
+              name: uploadedFile.name || file?.name || null,
               type:
                 uploadedFile.type ||
-                selectedFile?.type ||
+                file?.type ||
                 "application/octet-stream",
             }
           : null,
@@ -116,14 +131,15 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
         id: null,
         ts,
         date: today,
-        content: text || selectedFile?.name || "(file)",
+        type: entryType,
+        content: text || file?.name || "(file)",
         file: uploadedFile
           ? {
               path: uploadedFile.path || null,
-              name: uploadedFile.name || selectedFile?.name || null,
+              name: uploadedFile.name || file?.name || null,
               type:
                 uploadedFile.type ||
-                selectedFile?.type ||
+                file?.type ||
                 "application/octet-stream",
               url: uploadedFile.url || null,
             }
@@ -131,8 +147,14 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
       };
 
       setEntries((prev) => [normalizedEntry, ...prev]);
-      setNewEntry("");
-      setSelectedFile(null);
+      if (saveAsNote) {
+        setNoteDraft("");
+        setNoteFile(null);
+      } else {
+        setNewEntry("");
+        setSelectedFile(null);
+        setDraftType("idea");
+      }
 
       logActivity?.(
         `Logged new entry: "${(normalizedEntry.content || "").slice(0, 40)}${
@@ -155,7 +177,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
 
       return { ok: false, error: e?.message || "Save failed." };
     }
-  }, [newEntry, selectedFile, storage, logActivity]);
+  }, [newEntry, selectedFile, noteDraft, noteFile, draftType, storage, logActivity]);
 
   const deleteEntry = useCallback(
     async (e) => {
@@ -204,6 +226,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
             .map((x) => ({
               ts: x.ts,
               date: x.date,
+              type: ["idea", "note", "chronicle"].includes(x.type) ? x.type : null,
               content: x.content,
               file:
                 x.file && typeof x.file === "object"
@@ -224,6 +247,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
                 await storage.createEntry({
                   ts: row.ts,
                   date: row.date,
+                  type: row.type,
                   content: row.content,
                   file: row.file,
                 });
@@ -275,6 +299,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
 
         setNewEntry(text);
         setSelectedFile(file);
+        setDraftType("chronicle");
         logActivity?.(`Prepared Chronicle for review: ${file.name}`, "open");
 
         return { ok: true };
@@ -302,6 +327,11 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     );
   }, [entries, searchTerm]);
 
+  const ideas = useMemo(
+    () => entries.filter((entry) => entry.type === "idea"),
+    [entries]
+  );
+
   const groupedByDate = useMemo(() => {
     const map = new Map();
 
@@ -325,15 +355,23 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
 
   return {
     entries,
+    loading,
+    loadError,
     newEntry,
     setNewEntry,
     selectedFile,
     setSelectedFile,
+    draftType,
+    noteDraft,
+    setNoteDraft,
+    noteFile,
+    setNoteFile,
     searchTerm,
     setSearchTerm,
     selectedEntry,
     setSelectedEntry,
     filtered,
+    ideas,
     groupedByDate,
     handleSave,
     deleteEntry,
@@ -341,5 +379,6 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     handleChronicleImport,
     handleExportEntries,
     handleExportCSV,
+    reload: loadEntries,
   };
 }

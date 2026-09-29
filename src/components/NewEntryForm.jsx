@@ -7,6 +7,10 @@ export default function NewEntryForm({
   handleSave,
   handleImport,
   handleChronicleImport,
+  draftType = "idea",
+  placeholder,
+  showImports = true,
+  focusOnMount = true,
   disabled = false,
   saving = false,
 }) {
@@ -23,9 +27,9 @@ export default function NewEntryForm({
       <textarea
         value={newEntry}
         onChange={(e) => setNewEntry(e.target.value)}
-        placeholder="Capture an idea, observation, question, plan, or anything you do not want to lose…"
+        placeholder={placeholder || "Capture an idea, observation, question, plan, or anything you do not want to lose…"}
         rows={6}
-        autoFocus
+        autoFocus={focusOnMount}
       />
 
       <div className="idea-entry-form__actions">
@@ -35,7 +39,13 @@ export default function NewEntryForm({
           disabled={disabled || saving || (!newEntry.trim() && !selectedFile)}
           className="idea-entry-form__save"
         >
-          {saving ? "Saving securely…" : "Capture Idea"}
+          {saving
+            ? "Saving securely…"
+            : draftType === "chronicle"
+              ? "Save Chronicle"
+              : draftType === "note"
+                ? "Save entry"
+                : "Capture Idea"}
         </button>
 
         <label className="idea-entry-form__attachment">
@@ -43,7 +53,7 @@ export default function NewEntryForm({
           <input type="file" onChange={onFileChange} />
         </label>
 
-        <span className="idea-entry-form__shortcut">⌘/Ctrl + S</span>
+        <span className="idea-entry-form__shortcut">Ctrl/Cmd + S</span>
       </div>
 
       {selectedFile && (
@@ -58,7 +68,7 @@ export default function NewEntryForm({
         </div>
       )}
 
-      <details className="idea-entry-form__imports">
+      {showImports && <details className="idea-entry-form__imports">
         <summary>Import an existing archive</summary>
         <div className="idea-entry-form__import-actions">
           <button
@@ -97,10 +107,10 @@ export default function NewEntryForm({
           />
         </div>
         <p>
-          Imports load into Timedline for review. Nothing is saved until you
-          choose Capture Idea.
+          Imports load into Timedline for review. Chronicles are saved only
+          when you choose Save Chronicle.
         </p>
-      </details>
+      </details>}
     </div>
   );
 }

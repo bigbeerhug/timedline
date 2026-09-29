@@ -78,7 +78,7 @@ async function deleteFile(path) {
   }
 }
 
-async function createEntry({ ts, date, content, file }) {
+async function createEntry({ ts, date, type, content, file }) {
   const user = await getUser();
   if (!user) throw new Error("Not signed in");
 
@@ -86,6 +86,7 @@ async function createEntry({ ts, date, content, file }) {
     user_id: user.id,
     ts,
     date,
+    type: type ?? null,
     content,
     file: file
       ? {
@@ -122,6 +123,7 @@ async function createEntry({ ts, date, content, file }) {
     id: data.id,
     ts: data.ts,
     date: data.date,
+    type: data.type ?? null,
     content: data.content,
     file: resolvedFile,
   };
@@ -148,6 +150,7 @@ async function mapRows(rows) {
         id: row.id,
         ts: row.ts,
         date: row.date,
+        type: row.type ?? null,
         content: row.content,
         file,
       };

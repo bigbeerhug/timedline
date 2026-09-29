@@ -18,49 +18,22 @@ export default function HistoryDrawer({
   );
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)" }}>
-      <aside
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          position: "absolute",
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 380,
-          background: "#fff",
-          boxShadow: "-8px 0 24px rgba(0,0,0,0.15)",
-          padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Activity History</h3>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={onExportHistory}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #eee", background: "#fff", cursor: "pointer" }}
-            >
-              Export
-            </button>
-            <button
-              onClick={onClear}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #eee", background: "#fff", cursor: "pointer" }}
-            >
-              Clear
-            </button>
-            <button
-              onClick={onClose}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #eee", background: "#fff", cursor: "pointer" }}
-            >
-              Close
-            </button>
+    <div className="history-scrim" onClick={onClose}>
+      <aside className="history-drawer" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Activity history">
+        <div className="history-drawer__header">
+          <div>
+            <p className="eyebrow">A record of returning</p>
+            <h2 className="section-title">Activity</h2>
+          </div>
+          <div className="history-drawer__actions">
+            <button className="secondary-button" onClick={onExportHistory}>Export</button>
+            <button className="secondary-button" onClick={onClear}>Clear</button>
+            <button className="secondary-button" onClick={onClose}>Close</button>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <div className="history-drawer__controls">
+          <label>
             <input
               type="checkbox"
               checked={historyPaused}
@@ -71,7 +44,6 @@ export default function HistoryDrawer({
           <select
             value={historyFilter}
             onChange={(e) => setHistoryFilter(e.target.value)}
-            style={{ border: "1px solid #ddd", borderRadius: 8, padding: "6px 8px" }}
           >
             <option value="all">All</option>
             <option value="tab">Tabs</option>
@@ -84,13 +56,13 @@ export default function HistoryDrawer({
           </select>
         </div>
 
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {filtered.length === 0 && <li style={{ color: "#777" }}>No activity yet.</li>}
+        <div className="history-list">
+          <ul className="history-list">
+            {filtered.length === 0 && <li className="empty-state"><strong>No activity yet.</strong><p>Actions will appear here as you move through your vault.</p></li>}
             {filtered.map((a, i) => (
-              <li key={i} style={{ padding: "10px 0", borderBottom: "1px dashed #e5e7eb" }}>
-                <div style={{ fontSize: 13, color: "#111827" }}>{a.text}</div>
-                <div style={{ fontSize: 11, color: "#64748b" }}>
+              <li className="history-item" key={i}>
+                <div className="history-item__text">{a.text}</div>
+                <div className="history-item__meta">
                   {new Date(a.ts).toLocaleString()} • {a.type}
                 </div>
               </li>

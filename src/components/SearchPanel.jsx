@@ -1,4 +1,8 @@
 // src/components/SearchPanel.jsx
+import { useEffect, useState } from "react";
+
+const PAGE_SIZE = 25;
+
 export default function SearchPanel({
   searchTerm,
   setSearchTerm,
@@ -7,83 +11,67 @@ export default function SearchPanel({
   onLogSearch,
   onDelete,
 }) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const visible = filtered.slice(start, start + PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(0);
+  }, [searchTerm, filtered.length]);
+
   return (
-    <>
-      <div style={{ display: "flex", gap: 8 }}>
+    <div className="search-panel">
+      <form className="search-panel__form" onSubmit={(event) => { event.preventDefault(); onLogSearch?.(); }}>
         <input
+          className="search-panel__input"
           type="text"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onLogSearch?.();
-          }}
-          placeholder="Type to filter (e.g., car, 2025-08-29, photo.jpg)..."
-          style={{
-            flex: 1,
-            borderRadius: 12,
-            border: "1px solid #ddd",
-            padding: 10,
-            marginBottom: 12,
-          }}
+          placeholder="Search words, dates, filenames…"
+          aria-label="Search your preserved memories"
         />
-        <button
-          onClick={onLogSearch}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 12,
-            border: "1px solid #ddd",
-            background: "#fff",
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-        >
-          Go
+        <button className="search-panel__submit" type="submit">
+          Find
         </button>
-      </div>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-        {filtered.map((e, i) => (
-          <li
-            key={i}
-            style={{
-              padding: "6px 0",
-              color: "#333",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
-            }}
-          >
-            <div
-              onClick={() => onOpen?.(e)}
-              style={{ flex: 1, cursor: "pointer" }}
-              title="Open"
-            >
-              {e.date} —{" "}
-              {e.file?.type?.startsWith("image/") ? "📷" :
-               (/\.(pdf|doc|docx|txt|ppt|pptx|xls|xlsx)$/i.test(e.file?.name || e.content || "")) ? "📄" : "📝"}{" "}
-              {e.content}
-            </div>
-            <button
-              onClick={(ev) => {
+      </form>
+      {filtered.length > 0 && (
+        <div className="result-window" aria-live="polite">
+          <span>{start + 1}–{Math.min(start + PAGE_SIZE, filtered.length)} / {filtered.length}</span>
+          <div className="result-window__actions">
+            <button type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={safePage === 0}>Previous</button>
+            <span>Page {safePage + 1} of {pageCount}</span>
+            <button type="button" onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))} disabled={safePage >= pageCount - 1}>Next</button>
+          </div>
+        </div>
+      )}
+      <ul className="entry-list">
+        {visible.map((e, i) => (
+          <li className="entry-row" key={e.id ?? `${e.ts}-${i}`}>
+            <span className="entry-row__kind" aria-hidden="true">{e.file ? "file" : "note"}</span>
+            <button className="entry-row__body" onClick={() => onOpen?.(e)} title="Open memory">
+              <span className="entry-row__date">{e.date}</span>
+              <span className="entry-row__title">{e.content || e.file?.name || "Untitled memory"}</span>
+            </button>
+            <button className="entry-row__delete" onClick={(ev) => {
                 ev.stopPropagation();
                 onDelete?.(e);
               }}
               title="Delete entry"
-              style={{
-                padding: "4px 8px",
-                borderRadius: 8,
-                border: "1px solid #fda4af",
-                background: "#fff1f2",
-                color: "#991b1b",
-                cursor: "pointer",
-              }}
+              aria-label={`Delete memory from ${e.date}`}
             >
-              🗑
+              ×
             </button>
           </li>
         ))}
-        {filtered.length === 0 && <li style={{ color: "#777" }}>No matches.</li>}
+        {filtered.length === 0 && (
+          <li className="empty-state">
+            <strong>{searchTerm ? "Nothing found yet." : "Search the whole vault."}</strong>
+            <p>{searchTerm ? "Try a broader word, date, or filename." : "Every preserved entry is searchable by its words and capture date."}</p>
+          </li>
+        )}
       </ul>
-    </>
+    </div>
   );
 }
