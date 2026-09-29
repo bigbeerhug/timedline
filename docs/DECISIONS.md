@@ -30,3 +30,16 @@
   title, category, project, or other classification at capture time.
 - Existing entries and the imported Development Chronicle remain untouched;
   this PR includes no production migration or data rewrite.
+
+## 2026-09-29 — Deterministic document indexing first
+
+- File uploads should be indexed without a language-model API: extract text
+  locally from supported formats, derive factual file metadata and keyword
+  suggestions, then search the stored text with ranked full-text search.
+- AI-generated descriptions, tags, and semantic embeddings are deferred to the
+  leeway plan. They are not required for upload, indexing, or ordinary search.
+- Searchable extracted text is derived from the original attachment and is
+  separately stored so it can be rebuilt; the source file and user-entered
+  context remain the authoritative record.
+- Scanned-document OCR and broader file-format support can be added separately
+  after the text-search baseline is in use.

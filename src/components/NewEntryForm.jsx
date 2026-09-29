@@ -13,6 +13,8 @@ export default function NewEntryForm({
   focusOnMount = true,
   disabled = false,
   saving = false,
+  indexing = false,
+  indexProgress = null,
 }) {
   const importFileRef = useRef(null);
   const chronicleFileRef = useRef(null);
@@ -40,7 +42,9 @@ export default function NewEntryForm({
           className="idea-entry-form__save"
         >
           {saving
-            ? "Saving securely…"
+            ? indexing
+              ? "Reading file and saving…"
+              : "Saving securely…"
             : draftType === "chronicle"
               ? "Save Chronicle"
               : draftType === "note"
@@ -60,6 +64,20 @@ export default function NewEntryForm({
         <div className="idea-entry-form__selected">
           Selected: {selectedFile.name}
         </div>
+      )}
+
+      {indexing && (
+        <div className="idea-entry-form__notice" role="status">
+          {indexProgress?.total
+            ? `Reading PDF page ${indexProgress.completed} of ${indexProgress.total}…`
+            : "Extracting searchable text on this device…"}
+        </div>
+      )}
+
+      {selectedFile && !indexing && (
+        <p className="idea-entry-form__hint">
+          PDF, Word, text, Markdown, and CSV text is indexed on this device. Other files remain searchable by filename and your description.
+        </p>
       )}
 
       {disabled && (

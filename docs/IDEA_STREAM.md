@@ -40,3 +40,8 @@ Initial statuses are `raw`, `developing`, `ready`, `in_progress`, `executed`, `a
 ## Retrieval
 
 The module must support chronological browsing, exact idea-number lookup, full-text search, semantic search, tags, status filters, parent/branch navigation, and aggregate counts. Natural-language requests such as “find the coffee prank idea” should resolve to durable records, not merely the current chat transcript.
+
+The first retrieval release uses indexed full-text search and deterministic
+file metadata without an AI API. AI-generated descriptions, automatic
+semantic embeddings, and meaning-based retrieval remain deferred leeway items;
+they are not requirements for capturing or finding saved records.
