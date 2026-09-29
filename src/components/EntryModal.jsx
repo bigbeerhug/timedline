@@ -77,8 +77,26 @@ export default function EntryModal({
         {file && (
           <div className="entry-modal__file">
             <div><strong>Attachment</strong> · {file.name || "Unnamed file"}</div>
-            <div>{file.type || "Unknown file type"}</div>
+            <div>{entry.fileMetadata?.category ? `${entry.fileMetadata.category} · ` : ""}{file.type || "Unknown file type"}</div>
+            {entry.fileMetadata?.extractionStatus && (
+              <div>
+                Search indexing: {entry.fileMetadata.extractionStatus}
+                {entry.fileMetadata.characterCount > 0 ? ` · ${entry.fileMetadata.characterCount.toLocaleString()} characters` : ""}
+                {entry.fileMetadata.pageCount ? ` · ${entry.fileMetadata.pageCount} pages` : ""}
+              </div>
+            )}
+            {entry.fileMetadata?.keywords?.length > 0 && (
+              <div>Suggested keywords: {entry.fileMetadata.keywords.join(" · ")}</div>
+            )}
+            {entry.fileMetadata?.note && <div>{entry.fileMetadata.note}</div>}
           </div>
+        )}
+
+        {entry.extractedText && (
+          <details className="entry-modal__extracted-text">
+            <summary>View extracted text</summary>
+            <p>{entry.extractedText.slice(0, 6000)}{entry.extractedText.length > 6000 ? "…" : ""}</p>
+          </details>
         )}
 
         {showImage && (

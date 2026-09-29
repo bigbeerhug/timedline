@@ -162,6 +162,13 @@ export default function App() {
     setNoteFile,
     searchTerm,
     setSearchTerm,
+    searchPage,
+    setSearchPage,
+    searchLoading,
+    searchError,
+    searchTotalCount,
+    fileIndexing,
+    fileIndexProgress,
     selectedEntry,
     setSelectedEntry,
     filtered,
@@ -288,6 +295,8 @@ export default function App() {
         setLastError(
           error.includes("'type' column")
             ? "This cloud vault is missing entry classification. Nothing was saved. The existing entry-type migration must be applied before cloud captures can be saved."
+            : /extracted_text|file_metadata/i.test(error)
+              ? "This cloud vault needs the document-search migration before file-indexed entries can be saved. Nothing was saved."
             : error
         );
         return false;
@@ -417,6 +426,8 @@ export default function App() {
             setSelectedFile={setSelectedFile}
             disabled={wantsSupabase && (!usingSupabase || !user)}
             saving={saving}
+            fileIndexing={fileIndexing}
+            fileIndexProgress={fileIndexProgress}
             saveResult={saveResult?.type === "idea" || saveResult?.type === "chronicle" ? saveResult : null}
             handleSave={() => runSave(false)}
             handleImport={handleImport}
@@ -438,12 +449,21 @@ export default function App() {
                 <p className="eyebrow">Find what you meant to keep</p>
                 <h2 className="section-title">Search the vault</h2>
               </div>
-              <span className="panel-heading__meta">{filtered.length} result{filtered.length === 1 ? "" : "s"}</span>
+              <span className="panel-heading__meta">
+                {searchTerm && searchTotalCount > filtered.length
+                  ? `${filtered.length} of ${searchTotalCount} matches`
+                  : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
+              </span>
             </div>
             <SearchPanel
               searchTerm={searchTerm}
               setSearchTerm={setSearchTerm}
               filtered={filtered}
+              searchLoading={searchLoading}
+              searchError={searchError}
+              searchTotalCount={searchTotalCount}
+              searchPage={searchPage}
+              onPageChange={usingSupabase && searchTerm.trim() && !searchError ? setSearchPage : undefined}
               onOpen={(e) => {
                 setSelectedEntry(e);
                 logActivity(`Opened entry from ${e.date}`, "open");
@@ -487,6 +507,8 @@ export default function App() {
                 draftType="note"
                 disabled={wantsSupabase && (!usingSupabase || !user)}
                 saving={saving}
+                indexing={fileIndexing}
+                indexProgress={fileIndexProgress}
                 handleSave={() => runSave(true)}
                 showImports={false}
                 focusOnMount={false}

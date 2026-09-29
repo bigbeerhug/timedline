@@ -1,5 +1,7 @@
 // src/hooks/useVault.js
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { extractFileIndex } from "../lib/fileIndexing";
+import { makeSearchExcerpt, searchEntriesLocally } from "../lib/search";
 
 function exportJSON(data, filename) {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -21,7 +23,7 @@ function csvEscape(v) {
 }
 
 function exportCSV(entries, filename) {
-  const header = ["id", "ts", "date", "type", "content", "file_name", "file_type", "file_url"];
+  const header = ["id", "ts", "date", "type", "content", "file_name", "file_type", "file_path", "file_url", "extracted_text", "file_keywords"];
   const rows = entries.map((e) => [
     e.id ?? "",
     e.ts,
@@ -30,7 +32,10 @@ function exportCSV(entries, filename) {
     e.content ?? "",
     e.file?.name ?? "",
     e.file?.type ?? "",
+    e.file?.path ?? "",
     e.file?.url ?? "",
+    e.extractedText ?? "",
+    e.fileMetadata?.keywords?.join(" | ") ?? "",
   ]);
 
   const csv = [header.map(csvEscape).join(",")]
@@ -53,11 +58,20 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
   const [draftType, setDraftType] = useState("idea");
   const [noteDraft, setNoteDraft] = useState("");
   const [noteFile, setNoteFile] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTermState] = useState("");
+  const [searchPage, setSearchPage] = useState(0);
+  const [remoteSearch, setRemoteSearch] = useState({ query: "", page: 0, entries: [], totalCount: 0, loading: false, error: "" });
+  const [fileIndexing, setFileIndexing] = useState(false);
+  const [fileIndexProgress, setFileIndexProgress] = useState(null);
   const [selectedEntry, setSelectedEntry] = useState(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
+  const setSearchTerm = useCallback((value) => {
+    setSearchTermState(value);
+    setSearchPage(0);
+  }, []);
 
   const loadEntries = useCallback(async () => {
     if (!storage) {
@@ -104,9 +118,13 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     const today = d.toISOString().split("T")[0];
 
     let uploadedFile = null;
+    let fileIndex = { extractedText: "", fileMetadata: {} };
 
     try {
       if (file) {
+        setFileIndexing(true);
+        setFileIndexProgress(null);
+        fileIndex = await extractFileIndex(file, text, setFileIndexProgress);
         uploadedFile = await storage.uploadFile(file);
       }
 
@@ -125,6 +143,8 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
                 "application/octet-stream",
             }
           : null,
+        extractedText: fileIndex.extractedText,
+        fileMetadata: fileIndex.fileMetadata,
       });
 
       const normalizedEntry = created || {
@@ -144,6 +164,8 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
               url: uploadedFile.url || null,
             }
           : null,
+        extractedText: fileIndex.extractedText,
+        fileMetadata: fileIndex.fileMetadata,
       };
 
       setEntries((prev) => [normalizedEntry, ...prev]);
@@ -176,8 +198,50 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
       }
 
       return { ok: false, error: e?.message || "Save failed." };
+    } finally {
+      setFileIndexing(false);
+      setFileIndexProgress(null);
     }
   }, [newEntry, selectedFile, noteDraft, noteFile, draftType, storage, logActivity]);
+
+  useEffect(() => {
+    const query = (searchTerm || "").trim();
+    if (!query || !usingSupabase || typeof storage?.searchEntries !== "function") {
+      setRemoteSearch({ query, page: searchPage, entries: [], totalCount: 0, loading: false, error: "" });
+      return undefined;
+    }
+
+    let active = true;
+    setRemoteSearch((current) => ({ ...current, query, page: searchPage, loading: true, error: "" }));
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await storage.searchEntries(query, { limit: 25, offset: searchPage * 25 });
+        if (active) {
+          setRemoteSearch({
+            query,
+            page: searchPage,
+            entries: result.entries || [],
+            totalCount: result.totalCount || 0,
+            loading: false,
+            error: "",
+          });
+        }
+      } catch (error) {
+        console.error("[vault] searchEntries failed:", error);
+        if (active) {
+          const message = /search_entries|schema cache|function .*does not exist/i.test(error?.message || "")
+            ? "The document-search migration is not active yet. Search is limited to loaded entry text and filenames."
+            : error?.message || "Search failed.";
+          setRemoteSearch({ query, page: searchPage, entries: [], totalCount: 0, loading: false, error: message });
+        }
+      }
+    }, 220);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [searchPage, searchTerm, storage, usingSupabase]);
 
   const deleteEntry = useCallback(
     async (e) => {
@@ -228,6 +292,8 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
               date: x.date,
               type: ["idea", "note", "chronicle"].includes(x.type) ? x.type : null,
               content: x.content,
+              extractedText: typeof x.extractedText === "string" ? x.extractedText : "",
+              fileMetadata: x.fileMetadata && typeof x.fileMetadata === "object" ? x.fileMetadata : {},
               file:
                 x.file && typeof x.file === "object"
                   ? {
@@ -250,6 +316,8 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
                   type: row.type,
                   content: row.content,
                   file: row.file,
+                  extractedText: row.extractedText,
+                  fileMetadata: row.fileMetadata,
                 });
               } catch (e) {
                 console.warn(
@@ -315,17 +383,27 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
   );
 
   const filtered = useMemo(() => {
-    const q = (searchTerm || "").trim().toLowerCase();
-
+    const q = (searchTerm || "").trim();
     if (!q) return entries;
 
-    return entries.filter(
-      (e) =>
-        e.date.toLowerCase().includes(q) ||
-        (e.content || "").toLowerCase().includes(q) ||
-        (e.file?.name || "").toLowerCase().includes(q)
-    );
-  }, [entries, searchTerm]);
+    if (usingSupabase && storage?.searchEntries) {
+      if (remoteSearch.query !== q || remoteSearch.page !== searchPage) return [];
+      if (!remoteSearch.error) return remoteSearch.entries;
+    }
+
+    return searchEntriesLocally(entries, q).map((entry) => ({
+      ...entry,
+      searchExcerpt: entry.searchExcerpt || makeSearchExcerpt(entry, q),
+    }));
+  }, [entries, remoteSearch, searchPage, searchTerm, storage, usingSupabase]);
+
+  const searchLoading = remoteSearch.loading && remoteSearch.query === (searchTerm || "").trim() && remoteSearch.page === searchPage;
+  const searchError = remoteSearch.error && remoteSearch.query === (searchTerm || "").trim() && remoteSearch.page === searchPage
+    ? remoteSearch.error
+    : "";
+  const searchTotalCount = remoteSearch.query === (searchTerm || "").trim() && remoteSearch.page === searchPage
+    ? remoteSearch.totalCount
+    : 0;
 
   const ideas = useMemo(
     () => entries.filter((entry) => entry.type === "idea"),
@@ -343,15 +421,17 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [entries]);
 
-  const handleExportEntries = useCallback(() => {
-    exportJSON(entries, "timedline-entries.json");
+  const handleExportEntries = useCallback(async () => {
+    const exportEntries = await storage?.exportEntries?.() || entries;
+    exportJSON(exportEntries, "timedline-entries.json");
     logActivity?.("Exported vault as JSON", "export");
-  }, [entries, logActivity]);
+  }, [entries, logActivity, storage]);
 
-  const handleExportCSV = useCallback(() => {
-    exportCSV(entries, "timedline-entries.csv");
+  const handleExportCSV = useCallback(async () => {
+    const exportEntries = await storage?.exportEntries?.() || entries;
+    exportCSV(exportEntries, "timedline-entries.csv");
     logActivity?.("Exported vault as CSV", "export");
-  }, [entries, logActivity]);
+  }, [entries, logActivity, storage]);
 
   return {
     entries,
@@ -368,6 +448,13 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     setNoteFile,
     searchTerm,
     setSearchTerm,
+    searchPage,
+    setSearchPage,
+    searchLoading,
+    searchError,
+    searchTotalCount,
+    fileIndexing,
+    fileIndexProgress,
     selectedEntry,
     setSelectedEntry,
     filtered,

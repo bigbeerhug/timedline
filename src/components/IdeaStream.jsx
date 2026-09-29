@@ -21,6 +21,8 @@ export default function IdeaStream({
   setSelectedFile,
   disabled,
   saving,
+  fileIndexing,
+  fileIndexProgress,
   saveResult,
   handleSave,
   handleImport,
@@ -60,6 +62,8 @@ export default function IdeaStream({
           setSelectedFile={setSelectedFile}
           disabled={disabled}
           saving={saving}
+          indexing={fileIndexing}
+          indexProgress={fileIndexProgress}
           handleSave={handleSave}
           handleImport={handleImport}
           handleChronicleImport={handleChronicleImport}

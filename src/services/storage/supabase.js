@@ -78,7 +78,7 @@ async function deleteFile(path) {
   }
 }
 
-async function createEntry({ ts, date, type, content, file }) {
+async function createEntry({ ts, date, type, content, file, extractedText = "", fileMetadata = {} }) {
   const user = await getUser();
   if (!user) throw new Error("Not signed in");
 
@@ -97,6 +97,11 @@ async function createEntry({ ts, date, type, content, file }) {
         }
       : null,
   };
+
+  if (file || extractedText || Object.keys(fileMetadata || {}).length > 0) {
+    payload.extracted_text = extractedText || "";
+    payload.file_metadata = fileMetadata || {};
+  }
 
   const { data, error } = await supabaseClient
     .from("entries")
@@ -125,18 +130,20 @@ async function createEntry({ ts, date, type, content, file }) {
     date: data.date,
     type: data.type ?? null,
     content: data.content,
+    extractedText: data.extracted_text || "",
+    fileMetadata: data.file_metadata || {},
     file: resolvedFile,
   };
 }
 
-async function mapRows(rows) {
+async function mapRows(rows, { signFiles = true } = {}) {
   return await Promise.all(
     (rows || []).map(async (row) => {
       let file = null;
 
       if (row?.file) {
         const stored = row.file || {};
-        const signedUrl = stored.path ? await createSignedUrl(stored.path) : null;
+        const signedUrl = signFiles && stored.path ? await createSignedUrl(stored.path) : null;
 
         file = {
           path: stored.path || null,
@@ -152,6 +159,8 @@ async function mapRows(rows) {
         date: row.date,
         type: row.type ?? null,
         content: row.content,
+        extractedText: row.extracted_text || "",
+        fileMetadata: row.file_metadata || {},
         file,
       };
     })
@@ -162,15 +171,76 @@ async function listEntries() {
   const user = await getUser();
   if (!user) return [];
 
-  const { data, error } = await supabaseClient
+  let { data, error } = await supabaseClient
     .from("entries")
-    .select("*")
+    .select("id,ts,date,type,content,file,file_metadata")
     .eq("user_id", user.id)
     .order("ts", { ascending: false });
+
+  // Keep older deployments readable until the document-search migration lands.
+  if (error && /file_metadata|column .* does not exist/i.test(error.message || "")) {
+    ({ data, error } = await supabaseClient
+      .from("entries")
+      .select("id,ts,date,type,content,file")
+      .eq("user_id", user.id)
+      .order("ts", { ascending: false }));
+  }
 
   if (error) throw error;
 
   return await mapRows(data || []);
+}
+
+async function exportEntries() {
+  const user = await getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const { data, error } = await supabaseClient
+    .from("entries")
+    .select("id,ts,date,type,content,file,file_metadata,extracted_text")
+    .eq("user_id", user.id)
+    .order("ts", { ascending: false });
+
+  if (error) throw error;
+  return await mapRows(data || [], { signFiles: false });
+}
+
+async function searchEntries(query, { limit = 25, offset = 0 } = {}) {
+  const user = await getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const { data: matches, error: searchError } = await supabaseClient.rpc("search_entries", {
+    search_query: query,
+    result_limit: limit,
+    result_offset: offset,
+  });
+  if (searchError) throw searchError;
+  if (!matches?.length) return { entries: [], totalCount: 0 };
+
+  const ids = matches.map((match) => match.entry_id).filter(Boolean);
+  const { data: rows, error } = await supabaseClient
+    .from("entries")
+    .select("id,ts,date,type,content,file,file_metadata")
+    .eq("user_id", user.id)
+    .in("id", ids);
+
+  if (error) throw error;
+
+  const mapped = await mapRows(rows || []);
+  const byId = new Map(mapped.map((entry) => [String(entry.id), entry]));
+  const rankedEntries = matches
+    .map((match) => {
+      const entry = byId.get(String(match.entry_id));
+      return entry
+        ? { ...entry, searchRank: Number(match.rank) || 0, searchExcerpt: match.excerpt || "" }
+        : null;
+    })
+    .filter(Boolean);
+
+  return {
+    entries: rankedEntries,
+    totalCount: Number(matches[0]?.total_count) || rankedEntries.length,
+  };
 }
 
 async function deleteEntry(id, filePath) {
@@ -228,6 +298,8 @@ export default function supabaseDriver() {
     deleteFile,
     createEntry,
     listEntries,
+    exportEntries,
+    searchEntries,
     deleteEntry,
     logActivity,
     listActivity,

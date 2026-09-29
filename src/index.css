@@ -99,6 +99,7 @@ a { color: inherit; }
 .idea-entry-form__shortcut, .idea-entry-form__selected, .idea-entry-form__notice, .idea-entry-form__imports, .idea-stream__count { color: var(--muted); font-size: 12px; }
 .idea-entry-form__shortcut { margin-left: auto; font-family: "DM Mono", monospace; }
 .idea-entry-form__selected { display: inline-flex; margin-top: 11px; padding: 6px 9px; border-radius: 8px; background: var(--apricot-soft); color: #825d43; }
+.idea-entry-form__hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .idea-entry-form__notice { margin-top: 12px; color: #8a5b4e; }
 .idea-entry-form__imports { margin-top: 22px; padding-top: 17px; border-top: 1px solid rgba(126, 151, 132, .25); }
 .idea-entry-form__imports summary { color: var(--ink-soft); cursor: pointer; font-size: 12px; font-weight: 800; }
@@ -143,6 +144,12 @@ a { color: inherit; }
 .entry-row__body:hover .entry-row__title { color: var(--moss); }
 .entry-row__date { display: block; margin-bottom: 4px; color: var(--muted); font-family: "DM Mono", monospace; font-size: 10px; }
 .entry-row__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.5; }
+.entry-row__excerpt { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.entry-row__keywords { display: block; margin-top: 4px; color: var(--moss); font-family: "DM Mono", monospace; font-size: 9px; line-height: 1.5; text-transform: lowercase; }
+.search-panel__status { margin: 8px 0; color: var(--muted); font-size: 11px; }
+.entry-modal__extracted-text { margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink-soft); }
+.entry-modal__extracted-text summary { cursor: pointer; font-weight: 700; }
+.entry-modal__extracted-text p { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .entry-row__kind { display: inline-flex; align-items: center; justify-content: center; min-width: 31px; height: 27px; border-radius: 7px; background: var(--sage); color: var(--moss-deep); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 500; text-transform: uppercase; }
 .entry-row__delete { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 17px; }
 .entry-row__delete:hover { background: #fbefeb; color: var(--danger); }
