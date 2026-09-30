@@ -68,7 +68,9 @@ export default function NewEntryForm({
 
       {indexing && (
         <div className="idea-entry-form__notice" role="status">
-          {indexProgress?.total
+          {indexProgress?.kind === "archive"
+            ? `Cataloging ZIP contents ${indexProgress.completed} of ${indexProgress.total}: ${indexProgress.label}`
+            : indexProgress?.total
             ? `Reading PDF page ${indexProgress.completed} of ${indexProgress.total}…`
             : "Extracting searchable text on this device…"}
         </div>
@@ -76,7 +78,9 @@ export default function NewEntryForm({
 
       {selectedFile && !indexing && (
         <p className="idea-entry-form__hint">
-          PDF, Word, text, Markdown, and CSV text is indexed on this device. Other files remain searchable by filename and your description.
+          {selectedFile.name.toLowerCase().endsWith(".zip")
+            ? "ZIP archives stay as one Timeline entry with a searchable file list. Text from supported documents is indexed on this device; media is searchable by filename and file details."
+            : "PDF, Word, text, Markdown, and CSV text is indexed on this device. Other files remain searchable by filename and your description."}
         </p>
       )}
 

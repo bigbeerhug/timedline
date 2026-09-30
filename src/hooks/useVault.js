@@ -1,6 +1,6 @@
 // src/hooks/useVault.js
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { extractFileIndex } from "../lib/fileIndexing";
+import { extractArchiveMember, extractFileIndex } from "../lib/fileIndexing";
 import { makeSearchExcerpt, searchEntriesLocally } from "../lib/search";
 
 function exportJSON(data, filename) {
@@ -203,6 +203,84 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
       setFileIndexProgress(null);
     }
   }, [newEntry, selectedFile, noteDraft, noteFile, draftType, storage, logActivity]);
+
+  const createArchiveEntries = useCallback(async (archiveEntry, members, archiveSource, onProgress) => {
+    if (!archiveEntry?.file || !Array.isArray(members) || !members.length || !archiveSource) {
+      return { ok: false, createdCount: 0, failedCount: members?.length || 0, error: "Choose at least one archive file." };
+    }
+
+    let createdCount = 0;
+    const errors = [];
+    for (let index = 0; index < members.length; index += 1) {
+      const member = members[index];
+      let uploadedFile = null;
+      try {
+        const blob = await extractArchiveMember(archiveSource, member);
+        const extractedFile = new File([blob], member.name, { type: member.mimeType || "application/octet-stream" });
+        const fileIndex = await extractFileIndex(extractedFile, `${archiveEntry.file.name} ${member.path}`);
+        uploadedFile = await storage.uploadFile(extractedFile);
+        const date = new Date();
+        const ts = date.getTime();
+        const created = await storage.createEntry({
+          ts,
+          date: date.toISOString().split("T")[0],
+          type: null,
+          content: `From ${archiveEntry.file.name}: ${member.path}`,
+          file: {
+            path: uploadedFile.path || null,
+            name: uploadedFile.name || extractedFile.name,
+            type: uploadedFile.type || extractedFile.type || "application/octet-stream",
+            url: uploadedFile.url || null,
+          },
+          extractedText: fileIndex.extractedText,
+          fileMetadata: {
+            ...fileIndex.fileMetadata,
+            sourceArchive: {
+              entryId: archiveEntry.id ?? null,
+              entryTs: archiveEntry.ts,
+              archiveName: archiveEntry.file.name,
+              memberPath: member.path,
+              memberIndex: member.index,
+            },
+          },
+        });
+        const normalizedEntry = created || {
+          id: null,
+          ts,
+          date: date.toISOString().split("T")[0],
+          type: null,
+          content: `From ${archiveEntry.file.name}: ${member.path}`,
+          file: { ...uploadedFile, url: uploadedFile.url || null },
+          extractedText: fileIndex.extractedText,
+          fileMetadata: {
+            ...fileIndex.fileMetadata,
+            sourceArchive: {
+              entryId: archiveEntry.id ?? null,
+              entryTs: archiveEntry.ts,
+              archiveName: archiveEntry.file.name,
+              memberPath: member.path,
+              memberIndex: member.index,
+            },
+          },
+        };
+        createdCount += 1;
+        setEntries((previous) => [normalizedEntry, ...previous]);
+      } catch (error) {
+        errors.push(`${member.path}: ${error?.message || "could not be imported"}`);
+        if (uploadedFile?.path && typeof storage.deleteFile === "function") {
+          try {
+            await storage.deleteFile(uploadedFile.path);
+          } catch (cleanupError) {
+            console.warn("[vault] archive import cleanup failed:", cleanupError);
+          }
+        }
+      }
+      onProgress?.({ completed: index + 1, total: members.length, createdCount, failedCount: errors.length });
+    }
+
+    if (createdCount) logActivity?.(`Created ${createdCount} Timeline entr${createdCount === 1 ? "y" : "ies"} from ${archiveEntry.file.name}`, "save");
+    return { ok: errors.length === 0, createdCount, failedCount: errors.length, errors };
+  }, [storage, logActivity]);
 
   useEffect(() => {
     const query = (searchTerm || "").trim();
@@ -457,6 +535,7 @@ export default function useVault({ storage, usingSupabase, logActivity, user }) 
     fileIndexProgress,
     selectedEntry,
     setSelectedEntry,
+    createArchiveEntries,
     filtered,
     ideas,
     groupedByDate,
