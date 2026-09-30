@@ -171,6 +171,7 @@ export default function App() {
     fileIndexProgress,
     selectedEntry,
     setSelectedEntry,
+    createArchiveEntries,
     filtered,
     ideas,
     groupedByDate,
@@ -556,6 +557,7 @@ export default function App() {
         entry={selectedEntry}
         onClose={() => setSelectedEntry(null)}
         onCopyText={() => navigator.clipboard.writeText(selectedEntry?.content || "")}
+        onCreateArchiveEntries={createArchiveEntries}
       />
 
       <HistoryDrawer
