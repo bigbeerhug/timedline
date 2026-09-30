@@ -71,8 +71,8 @@ as $$
   select ranked.entry_id, ranked.rank, ranked.total_count, ranked.excerpt
   from ranked
   order by ranked.rank desc, ranked.sort_ts desc
-  limit pg_catalog.least(pg_catalog.greatest(coalesce(result_limit, 25), 1), 100)
-  offset pg_catalog.greatest(coalesce(result_offset, 0), 0);
+  limit least(greatest(coalesce(result_limit, 25), 1), 100)
+  offset greatest(coalesce(result_offset, 0), 0);
 $$;
 
 revoke all on function public.search_entries(text, integer, integer) from public, anon;
